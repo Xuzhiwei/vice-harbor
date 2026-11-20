@@ -1,14 +1,21 @@
-// A working gta6-01 entry (Node 22, standard library only): the game is this directory's
-// game/ folder, plain static files a desktop browser loads offline (game/index.html and its ES
-// modules, no library and no network request), and the program hands it in. It copies game/ and
-// screenshots/ from beside this file to /output and writes /output/dossier.json, the summary the
-// judge reads, with the vendored make.fun library. Only the plumbing, not an open world: Block
-// Dodger, a plain 2D canvas game where a paddle dodges falling blocks and catches coins, with a
-// title screen, score, lives and levels, game over and restart, flat colours and no sound. Build
-// your own open-world crime game in its place (three.js or any library you vendor under game/),
-// put your 3 or 4 PNG or JPEG screenshots in screenshots/ (the first by name is the cover) and run it.
+// Vice Harbor — the make.fun gta6-01 entry program (Node 22, standard library only).
 //
-// Serve it locally with `node serve.ts`, then open http://localhost:8080.
+// The game is this directory's game/ folder: "Vice Harbor", an original top-down
+// open-world crime game that runs as plain static files in a desktop browser — a
+// coastal city of avenues, neon-signed buildings, parks and a beach; traffic and
+// pedestrians; cars to steal and drive; a five-star wanted system with pursuing
+// police; a pistol, fists and car combat; a six-mission story told by five harbour
+// characters; taxi fares and lost packages for cash between jobs; a minimap HUD;
+// procedural WebAudio sound; and a localStorage save. No library, no build step,
+// no network request: game/index.html and its ES modules under game/src/ are the
+// whole game, each file with one clear job (city, vehicles, pedestrians, police,
+// missions, combat, hud, render, audio, save).
+//
+// This program hands the entry in: it copies game/ and screenshots/ from beside
+// this file to /output and writes /output/dossier.json, the summary the judge
+// reads, with the vendored make.fun library (vendor/makefun-game.ts, unchanged).
+//
+// Serve the game locally with `node serve.ts`, then open http://localhost:8080.
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 

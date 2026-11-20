@@ -1,53 +1,89 @@
-// Keyboard and pointer input. Held keys give a steering direction; one-shot presses (start or
-// restart, pause) are queued as bit flags and taken once by the loop, so a press between two
-// frames is never lost and never counted twice.
+// Vice Harbor — keyboard and mouse state. The loop reads held keys and the mouse every
+// frame; one-shot actions (interact, pause, melee…) are latched as bits and consumed once
+// by whoever asks, so a press is never seen twice and never missed between steps.
+export const ACT_INTERACT = 1;
+export const ACT_PAUSE = 2;
+export const ACT_MELEE = 4;
+export const ACT_RELOAD = 8;
+export const ACT_MUTE = 16;
+export const ACT_CONFIRM = 32;
 
-export const ACTION_CONFIRM = 1;
-export const ACTION_PAUSE = 2;
+const ACTION_KEYS = {
+  KeyE: ACT_INTERACT,
+  Escape: ACT_PAUSE,
+  KeyP: ACT_PAUSE,
+  KeyF: ACT_MELEE,
+  KeyR: ACT_RELOAD,
+  KeyM: ACT_MUTE,
+  Enter: ACT_CONFIRM,
+  Space: ACT_CONFIRM,
+};
 
-const LEFT = new Set(['ArrowLeft', 'KeyA']);
-const RIGHT = new Set(['ArrowRight', 'KeyD']);
-const CONFIRM = new Set(['Space', 'Enter']);
-const PAUSE = new Set(['KeyP', 'Escape']);
-
-export function createInput(target) {
-  let left = false;
-  let right = false;
+export function createInput(canvas) {
+  const held = new Set();
   let actions = 0;
+  let mouseX = 0;
+  let mouseY = 0;
+  let mouseDown = false;
+  let clicked = false;
 
   window.addEventListener('keydown', (event) => {
-    if (LEFT.has(event.code)) left = true;
-    else if (RIGHT.has(event.code)) right = true;
-    else if (CONFIRM.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_CONFIRM;
-    } else if (PAUSE.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_PAUSE;
-    } else return;
-    event.preventDefault();
+    if (event.repeat) return;
+    held.add(event.code);
+    const bit = ACTION_KEYS[event.code];
+    if (bit) actions |= bit;
+    if (event.code === 'Space' || event.code.startsWith('Arrow')) event.preventDefault();
   });
-  window.addEventListener('keyup', (event) => {
-    if (LEFT.has(event.code)) left = false;
-    else if (RIGHT.has(event.code)) right = false;
-  });
-  // A key released while the tab is hidden never sends keyup: let go of everything on blur.
+  window.addEventListener('keyup', (event) => held.delete(event.code));
   window.addEventListener('blur', () => {
-    left = false;
-    right = false;
+    held.clear();
+    mouseDown = false;
   });
-  target.addEventListener('pointerdown', () => {
-    actions |= ACTION_CONFIRM;
+  canvas.addEventListener('mousemove', (event) => {
+    const rect = canvas.getBoundingClientRect();
+    mouseX = (event.clientX - rect.left) * (canvas.width / Math.max(1, rect.width));
+    mouseY = (event.clientY - rect.top) * (canvas.height / Math.max(1, rect.height));
   });
+  canvas.addEventListener('mousedown', (event) => {
+    if (event.button === 0) {
+      mouseDown = true;
+      clicked = true;
+      actions |= ACT_CONFIRM;
+    }
+  });
+  window.addEventListener('mouseup', (event) => {
+    if (event.button === 0) mouseDown = false;
+  });
+  canvas.addEventListener('contextmenu', (event) => event.preventDefault());
 
   return {
-    /** -1 for left, 1 for right, 0 for neither or both. */
-    direction() {
-      return (right ? 1 : 0) - (left ? 1 : 0);
+    /** Movement axes from WASD or the arrow keys: x right, y down, each -1..1. */
+    moveAxis() {
+      const x = (held.has('KeyD') || held.has('ArrowRight') ? 1 : 0) - (held.has('KeyA') || held.has('ArrowLeft') ? 1 : 0);
+      const y = (held.has('KeyS') || held.has('ArrowDown') ? 1 : 0) - (held.has('KeyW') || held.has('ArrowUp') ? 1 : 0);
+      return { x, y };
     },
-    /** The one-shot presses since the last call, as ACTION_* flags. */
+    /** Driving input for the car the player sits in. */
+    drive() {
+      return {
+        throttle: (held.has('KeyW') || held.has('ArrowUp') ? 1 : 0) - (held.has('KeyS') || held.has('ArrowDown') ? 1 : 0),
+        steer: (held.has('KeyD') || held.has('ArrowRight') ? 1 : 0) - (held.has('KeyA') || held.has('ArrowLeft') ? 1 : 0),
+        handbrake: held.has('Space'),
+      };
+    },
+    sprint: () => held.has('ShiftLeft') || held.has('ShiftRight'),
+    mouse: () => ({ x: mouseX, y: mouseY, down: mouseDown }),
+    /** Consume the latched one-shot actions; each call clears them. */
     takeActions() {
       const taken = actions;
       actions = 0;
       return taken;
+    },
+    /** True once per physical click, for menus and dialogue. */
+    takeClick() {
+      const was = clicked;
+      clicked = false;
+      return was;
     },
   };
 }

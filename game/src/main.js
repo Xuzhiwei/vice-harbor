@@ -1,52 +1,50 @@
-// Boot and the one loop: input is read every frame, the world advances in fixed 1/60 s steps
-// (several in a slow frame, none in a fast one), and the renderer paints what is there. The game
-// moves between four screens: title, play, paused and game over.
-//
-// ?seed=N fixes the falling pattern. ?shot=start|play|end (with &seed=N) stages that scene
-// instead of running the loop, paints it twice and sets window.__shotReady for a screenshot.
-import { BEST_KEY, LIVES, STEP } from './config.js';
-import { createRandom } from './random.js';
-import { createWorld, EVENT_HIT, EVENT_OVER } from './world.js';
-import { ACTION_CONFIRM, ACTION_PAUSE, createInput } from './input.js';
-import { createRenderer, SCREEN_OVER, SCREEN_PAUSED, SCREEN_PLAY, SCREEN_TITLE } from './render.js';
+// Vice Harbor — boot and the one loop. The world advances in fixed steps behind four
+// screens (title, play, pause, and the busted/wasted endings); input actions route to
+// whichever screen is up. ?shot=cover|chase|mission|night&seed=N stages a deterministic
+// scene instead of running the loop, paints it twice and sets window.__shotReady.
+import { STEP, WORLD_W } from './config.js';
+import { createInput, ACT_INTERACT, ACT_PAUSE, ACT_MELEE, ACT_RELOAD, ACT_MUTE, ACT_CONFIRM } from './input.js';
+import { createGame, stepGame, respawn, VIEW_W, VIEW_H } from './world.js';
+import { tryEnterExit } from './vehicles.js';
+import { meleeSwing, startReload } from './combat.js';
+import { createAudio } from './audio.js';
+import { hasSave, saveGame, loadGame } from './save.js';
+import { drawWorld, drawTitleScreen, drawPauseScreen, drawEndScreen } from './render.js';
+import { drawHUD } from './hud.js';
 import { stageShot } from './shots.js';
 
-/** The longest frame the loop catches up on; a longer stall (a hidden tab) is dropped, not replayed. */
+const CITY_SEED = 987123;
 const MAX_FRAME = 0.25;
 
 const params = new URLSearchParams(window.location.search);
 const shot = params.get('shot');
-const seedParam = Number.parseInt(params.get('seed') ?? '', 10);
-const seed = Number.isInteger(seedParam) ? seedParam : Math.floor(Math.random() * 4294967296);
-
 const canvas = document.getElementById('game');
 const status = document.getElementById('status');
-const world = createWorld(createRandom(seed));
-const renderer = createRenderer(canvas);
+const ctx = canvas.getContext('2d');
+const audio = createAudio();
 
-function readBest() {
-  try {
-    return Number.parseInt(window.localStorage.getItem(BEST_KEY) ?? '0', 10) || 0;
-  } catch {
-    return 0;
-  }
+function fitCanvas() {
+  const scale = Math.min(window.innerWidth / VIEW_W, window.innerHeight / VIEW_H);
+  canvas.style.width = `${Math.floor(VIEW_W * scale)}px`;
+  canvas.style.height = `${Math.floor(VIEW_H * scale)}px`;
 }
+window.addEventListener('resize', fitCanvas);
+fitCanvas();
 
-function saveBest(value) {
-  try {
-    window.localStorage.setItem(BEST_KEY, String(value));
-  } catch {
-    // Storage can be off (private windows): the best score then lasts this visit only.
-  }
+function announce(message) {
+  status.textContent = message;
 }
 
 function runShot(name) {
-  const scene = stageShot(name, world);
+  const state = createGame(CITY_SEED, null);
+  stageShot(name, state, stepGame);
+  window.__state = state; // QA handle: lets a headless check read the staged world.
   let painted = 0;
   function paint() {
-    renderer.draw(world.state, scene.screen, scene.best);
+    drawWorld(ctx, state);
+    drawHUD(ctx, state);
     painted += 1;
-    if (painted < 2) requestAnimationFrame(paint);
+    if (painted < 3) requestAnimationFrame(paint);
     else window.__shotReady = true;
   }
   requestAnimationFrame(paint);
@@ -54,52 +52,88 @@ function runShot(name) {
 
 function runGame() {
   const input = createInput(canvas);
-  let screen = SCREEN_TITLE;
-  let best = readBest();
+  let state = createGame(CITY_SEED, audio);
+  let screen = 'title';
   let accumulator = 0;
   let last = performance.now();
+  let titlePan = 0;
+  const extraKeys = new Set();
+  window.addEventListener('keydown', (event) => {
+    if (!event.repeat) extraKeys.add(event.code);
+  });
 
-  // Screen readers (and anyone watching the page's text) hear the screen changes and each hit.
-  function announce(message) {
-    status.textContent = message;
+  function newGame() {
+    state = createGame(CITY_SEED, audio);
+    screen = 'play';
+    state.screen = 'play';
+    announce('Vice Harbor. Meet your contact at the orange marker.');
   }
 
-  function startGame() {
-    world.reset();
-    accumulator = 0;
-    screen = SCREEN_PLAY;
-    announce(`Playing. ${LIVES} lives.`);
-  }
-
-  function endGame() {
-    screen = SCREEN_OVER;
-    if (world.state.score > best) {
-      best = world.state.score;
-      saveBest(best);
+  function continueGame() {
+    state = createGame(CITY_SEED, audio);
+    if (loadGame(state)) {
+      screen = 'play';
+      state.screen = 'play';
+      state.toast = { text: 'Welcome back to Vice Harbor', time: 3 };
+      announce('Save loaded.');
+    } else {
+      newGame();
     }
-    announce(`Game over. Score ${world.state.score}. Best ${best}.`);
   }
 
   function handleActions() {
     const actions = input.takeActions();
-    if (actions & ACTION_CONFIRM && (screen === SCREEN_TITLE || screen === SCREEN_OVER)) startGame();
-    else if (actions & ACTION_PAUSE && screen === SCREEN_PLAY) {
-      screen = SCREEN_PAUSED;
-      announce('Paused.');
-    } else if (actions & (ACTION_PAUSE | ACTION_CONFIRM) && screen === SCREEN_PAUSED) {
-      screen = SCREEN_PLAY;
-      announce('Playing.');
+    const clicked = input.takeClick();
+    if (actions & ACT_MUTE) {
+      const muted = audio.setMuted(!audio.muted);
+      state.toast = { text: muted ? 'Sound off' : 'Sound on', time: 1.6 };
     }
-  }
-
-  function step() {
-    if (screen === SCREEN_TITLE) {
-      world.step(STEP, 0, true);
+    if (screen === 'title') {
+      if (extraKeys.has('KeyC') && hasSave()) {
+        audio.unlock();
+        continueGame();
+      } else if (actions & ACT_CONFIRM) {
+        audio.unlock();
+        newGame();
+      }
       return;
     }
-    const events = world.step(STEP, input.direction(), false);
-    if (events & EVENT_OVER) endGame();
-    else if (events & EVENT_HIT) announce(world.state.lives === 1 ? 'Hit. 1 life left.' : `Hit. ${world.state.lives} lives left.`);
+    if (screen === 'busted' || screen === 'wasted') {
+      if (actions & ACT_CONFIRM) {
+        respawn(state, screen === 'busted');
+        screen = 'play';
+        state.screen = 'play';
+      }
+      return;
+    }
+    if (screen === 'pause') {
+      if (actions & (ACT_PAUSE | ACT_CONFIRM)) {
+        screen = 'play';
+        state.screen = 'play';
+      } else if (extraKeys.has('KeyS')) {
+        if (saveGame(state)) state.toast = { text: 'Saved', time: 1.8 };
+      } else if (extraKeys.has('KeyN')) {
+        newGame();
+      }
+      return;
+    }
+    // Play screen.
+    if (actions & ACT_PAUSE) {
+      screen = 'pause';
+      state.screen = 'pause';
+      announce('Paused.');
+      return;
+    }
+    if (actions & ACT_INTERACT) {
+      if (state.dialogue) state.dialogueAdvance = true;
+      else {
+        const message = tryEnterExit(state);
+        if (message) state.toast = { text: message, time: 1.6 };
+      }
+    }
+    if (clicked && state.dialogue) state.dialogueAdvance = true;
+    if (actions & ACT_MELEE) meleeSwing(state);
+    if (actions & ACT_RELOAD) startReload(state);
   }
 
   function frame(now) {
@@ -107,26 +141,72 @@ function runGame() {
     accumulator += Math.min((now - last) / 1000, MAX_FRAME);
     last = now;
     handleActions();
-    if (screen === SCREEN_TITLE || screen === SCREEN_PLAY) {
-      while (accumulator >= STEP && (screen === SCREEN_TITLE || screen === SCREEN_PLAY)) {
-        step();
+    extraKeys.clear();
+
+    if (screen === 'title') {
+      // The harbour idles behind the title: traffic rolls, the camera drifts.
+      titlePan += 1 / 60;
+      while (accumulator >= STEP) {
+        stepGame(state, input, STEP);
         accumulator -= STEP;
+      }
+      state.camera.x = (Math.sin(titlePan * 0.11) * 0.5 + 0.5) * (WORLD_W - VIEW_W);
+      state.camera.y = (Math.cos(titlePan * 0.07) * 0.5 + 0.5) * 900;
+      drawWorld(ctx, state);
+      drawTitleScreen(ctx, state, hasSave());
+      return;
+    }
+
+    if (screen === 'play') {
+      let guard = 0;
+      while (accumulator >= STEP && guard < 6) {
+        stepGame(state, input, STEP);
+        accumulator -= STEP;
+        guard += 1;
+        if (state.busted) {
+          screen = 'busted';
+          state.screen = 'busted';
+          audio.busted();
+          announce('Busted.');
+          break;
+        }
+        if (state.wasted) {
+          screen = 'wasted';
+          state.screen = 'wasted';
+          announce('Wasted.');
+          break;
+        }
+      }
+      if (state.dirtySave) {
+        state.dirtySave = false;
+        saveGame(state);
       }
     } else {
       accumulator = 0;
     }
-    renderer.draw(world.state, screen, best);
+
+    drawWorld(ctx, state);
+    drawHUD(ctx, state);
+    if (screen === 'pause') drawPauseScreen(ctx, state);
+    if (screen === 'busted') drawEndScreen(ctx, state, 'busted');
+    if (screen === 'wasted') drawEndScreen(ctx, state, 'wasted');
+
+    const p = state.player;
+    let copDistance = Infinity;
+    for (const cop of state.cops) {
+      if (!cop.dead) copDistance = Math.min(copDistance, Math.hypot(cop.x - p.x, cop.y - p.y));
+    }
+    audio.frame(p.inCar ? Math.hypot(p.inCar.vx, p.inCar.vy) : 0, Boolean(p.inCar), copDistance);
   }
 
-  // Leaving the tab pauses a running game rather than letting blocks fall unseen.
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden && screen === SCREEN_PLAY) {
-      screen = SCREEN_PAUSED;
-      announce('Paused.');
+    if (document.hidden && screen === 'play') {
+      screen = 'pause';
+      state.screen = 'pause';
     }
   });
 
-  announce('Block Dodger. Press Space or click to start.');
+  announce('Vice Harbor. Press Enter to start.');
   requestAnimationFrame(frame);
 }
 
