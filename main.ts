@@ -1,48 +1,65 @@
-// Vice Harbor — the make.fun gta6-01 entry program (Node 22, standard library only).
-//
-// The game is this directory's game/ folder: "Vice Harbor", an original top-down
-// open-world crime game that runs as plain static files in a desktop browser — a
-// coastal city of avenues, neon-signed buildings, parks and a beach; traffic and
-// pedestrians; cars to steal and drive; a five-star wanted system with pursuing
-// police; a pistol, fists and car combat; a six-mission story told by five harbour
-// characters; taxi fares and lost packages for cash between jobs; a minimap HUD;
-// procedural WebAudio sound; and a localStorage save. No library, no build step,
-// no network request: game/index.html and its ES modules under game/src/ are the
-// whole game, each file with one clear job (city, vehicles, pedestrians, police,
-// missions, combat, hud, render, audio, save).
-//
-// This program hands the entry in: it copies game/ and screenshots/ from beside
-// this file to /output and writes /output/dossier.json, the summary the judge
-// reads, with the vendored make.fun library (vendor/makefun-game.ts, unchanged).
-//
-// Serve the game locally with `node serve.ts`, then open http://localhost:8080.
-// Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
-//   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
-
-import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+// Vice Harbor hand-in program (Node 22, no dependencies beyond the kit's
+// vendored dossier library). Copies game/ and screenshots/ next to the
+// output dossier and writes dossier.json with buildDossier, refusing any
+// entry that would break the scorer's caps before it writes anything.
+import { cpSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-game.ts';
 
-const here = fileURLToPath(new URL('.', import.meta.url));
-const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+const CAPS = {
+  text_max_bytes: 16 * 1024 * 1024,
+  screenshots: { max: 4, max_bytes: 256 * 1024 },
+  game_max_files: 993,
+  game_max_bytes: 48 * 1024 * 1024,
+  game_path_max_bytes: 1000,
+};
 
-mkdirSync(out, { recursive: true });
-cpSync(join(here, 'game'), join(out, 'game'), { recursive: true });
-mkdirSync(join(out, 'screenshots'), { recursive: true });
-if (existsSync(join(here, 'screenshots'))) cpSync(join(here, 'screenshots'), join(out, 'screenshots'), { recursive: true });
+const root = resolve(fileURLToPath(new URL('.', import.meta.url)));
+const outDir = resolve(process.env.MAKEFUN_OUTPUT_DIR || '/output');
+const gameDir = join(root, 'game');
+const shotsDir = join(root, 'screenshots');
 
-// The scorer's own caps (reference/gate.json): only text_max_bytes shapes the bytes; the others refuse an entry the
-// scorer would refuse (more than 4 screenshots or one over 256 KiB; more than 993 files in game/ or 48 MiB of game
-// files, in all, or a path under game/ over 1000 bytes: game/ counts beside /output's own 1000-entry cap, its
-// screenshots/ and dossier.json).
-writeFileSync(
-  join(out, 'dossier.json'),
-  buildDossier(out, {
-    text_max_bytes: 163840,
-    screenshots: { max: 4, max_bytes: 262144 },
-    game_max_files: 993,
-    game_max_bytes: 50331648,
-    game_path_max_bytes: 1000,
-  }),
-);
+function fail(msg: string): never {
+  console.error(`vice-harbor hand-in: ${msg}`);
+  process.exit(1);
+}
+
+function walk(dir: string, base: string, acc: string[]): void {
+  for (const name of readdirSync(dir)) {
+    const full = join(dir, name);
+    const rel = base ? `${base}/${name}` : name;
+    if (statSync(full).isDirectory()) walk(full, rel, acc);
+    else acc.push(rel);
+  }
+}
+
+// --- pre-flight checks against the scorer caps -----------------------------
+if (!existsSync(join(gameDir, 'index.html'))) fail('game/index.html is missing');
+if (!existsSync(shotsDir)) fail('screenshots/ is missing');
+
+const gameFiles: string[] = [];
+walk(gameDir, '', gameFiles);
+if (gameFiles.length > CAPS.game_max_files) fail(`game/ holds ${gameFiles.length} files, over the ${CAPS.game_max_files} cap`);
+let gameBytes = 0;
+for (const rel of gameFiles) {
+  gameBytes += statSync(join(gameDir, rel)).size;
+  if (Buffer.byteLength(rel, 'utf8') > CAPS.game_path_max_bytes) fail(`game path too long: ${rel}`);
+}
+if (gameBytes > CAPS.game_max_bytes) fail(`game/ is ${gameBytes} bytes, over the ${CAPS.game_max_bytes} cap`);
+
+const shotFiles = readdirSync(shotsDir).filter((n) => /\.(png|jpe?g)$/i.test(n)).sort();
+if (shotFiles.length === 0) fail('screenshots/ holds no PNG/JPEG screens');
+if (shotFiles.length > CAPS.screenshots.max) fail(`${shotFiles.length} screenshots, over the ${CAPS.screenshots.max} cap`);
+for (const name of shotFiles) {
+  const size = statSync(join(shotsDir, name)).size;
+  if (size > CAPS.screenshots.max_bytes) fail(`screenshot ${name} is ${size} bytes, over the ${CAPS.screenshots.max_bytes} cap`);
+}
+
+// --- copy + dossier ----------------------------------------------------------
+mkdirSync(outDir, { recursive: true });
+cpSync(gameDir, join(outDir, 'game'), { recursive: true });
+cpSync(shotsDir, join(outDir, 'screenshots'), { recursive: true });
+const dossier = buildDossier(root, CAPS);
+writeFileSync(join(outDir, 'dossier.json'), dossier);
+console.log(`vice-harbor: handed in ${gameFiles.length} game files (${gameBytes} bytes), ${shotFiles.length} screenshots, dossier ${dossier.length} bytes -> ${outDir}`);

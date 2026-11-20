@@ -1,210 +1,77 @@
-// Vice Harbor — the screenshot scenes behind ?shot=cover|chase|mission|night.
-// Each stages the real game state (fixed city seed, fixed clock, placed cars and
-// cruisers), runs the true simulation forward a little so the frame is alive, then
-// pins the principals back into their marks before the picture is taken.
-import { STEP } from './config.js';
-import { createCar } from './vehicles.js';
-import { startDialogue } from './missions.js';
-import { updateCamera } from './world.js';
+// Deterministic staged scenes for screenshots, selected with ?shot=<name>.
+// The world is built from a fixed seed, the sim is stepped a fixed number of
+// ticks in main.js, then these pins place the hero actors exactly.
+import { forceStars } from './police.js';
+import { makeCar } from './vehicles.js';
+import { CHARACTERS } from './missions.js';
 
-const IDLE = {
-  moveAxis: () => ({ x: 0, y: 0 }),
-  drive: () => ({ throttle: 0, steer: 0, handbrake: false }),
-  sprint: () => false,
-  mouse: () => ({ x: 640, y: 400, down: false }),
-  takeActions: () => 0,
-  takeClick: () => false,
-};
-
-const DRIVE = {
-  ...IDLE,
-  drive: () => ({ throttle: 1, steer: 0, handbrake: false }),
-};
-
-function stepN(state, input, n, stepGame) {
-  for (let i = 0; i < n; i += 1) stepGame(state, input, STEP);
+export function shotNameFromUrl() {
+  try { return new URLSearchParams(location.search).get('shot'); }
+  catch { return null; }
 }
 
-function putPlayerInCar(state, x, y, angle, color) {
-  let car = state.cars.find((c) => c.kind === 'parked');
-  if (!car) car = state.cars[0];
-  car.x = x; car.y = y; car.angle = angle;
-  car.vx = 0; car.vy = 0; car.speed = 0;
-  car.color = color || car.color;
-  car.wasPlayerKind = 'parked';
-  car.kind = 'player';
-  state.player.inCar = car;
-  state.player.x = x; state.player.y = y;
+function parkHeroCar(G, x, y, angle, color, kind) {
+  const car = makeCar(G, x, y, angle, { kind: kind || 'coupe', color });
+  car.driver = 'parked'; car.speed = 0;
+  G.cars.push(car);
   return car;
 }
 
-function addCop(state, x, y, angle) {
-  const cop = createCar(x, y, angle, '#f4f6f8', 'cop');
-  cop.health = 130;
-  state.cops.push(cop);
-  state.cars.push(cop);
-  return cop;
+export function stageShot(G, C, name) {
+  G.mode = 'play';
+  if (name === '1-cover' || name === 'cover') {
+    G.hour = 17.85;
+    // Beachfront downtown: player on foot beside a coupe, marina behind,
+    // avenue traffic in frame, beach + sea at the right edge.
+    G.player.x = 2475; G.player.y = 1472; G.player.angle = 0.5; G.player.car = null;
+    parkHeroCar(G, 2525, 1505, 0.25, '#e74c3c', 'coupe');
+    parkHeroCar(G, 2380, 1560, -0.4, '#3498db', 'sedan');
+    const t1 = makeCar(G, 2452, 1180, Math.PI / 2, { kind: 'taxi' });
+    t1.driver = 'traffic'; t1.dirX = 1; t1.dirY = 0; t1.speed = 130; G.cars.push(t1);
+    const t2 = makeCar(G, 2408, 1750, -Math.PI / 2, { kind: 'sedan', color: '#f1c40f' });
+    t2.driver = 'traffic'; t2.dirX = -1; t2.dirY = 0; t2.speed = 120; G.cars.push(t2);
+    G.cash = 420;
+  } else if (name === '2-chase' || name === 'chase') {
+    G.hour = 16.9;
+    const hero = makeCar(G, 1560, 1310, 0, { kind: 'coupe', color: '#e74c3c' });
+    hero.driver = 'player'; hero.speed = 330; hero.vx = 330; hero.vy = 0;
+    G.cars.push(hero);
+    G.player.car = hero; G.player.x = hero.x; G.player.y = hero.y;
+    for (const [dx, dy] of [[-108, -36], [-196, 28], [-292, -12]]) {
+      const cop = makeCar(G, hero.x + dx, hero.y + dy, 0, { kind: 'sedan', color: '#2c3e50' });
+      cop.driver = 'cop'; cop.isCop = true; cop.speed = 300; cop.sirenPhase = dx;
+      G.cops.push(cop);
+    }
+    forceStars(G, 4);
+    const M = G.missions;
+    M.active = { def: M.defs[3], leg: 1, timer: 96 };
+    G.banner = 'MISSION: Harbour Lights'; G.bannerT = 999;
+    G.cash = 1420;
+  } else if (name === '3-mission' || name === 'mission') {
+    G.hour = 18.4;
+    const P = G.city.places;
+    G.player.x = P.club.x - 60; G.player.y = P.club.y + 36; G.player.angle = 2.6; G.player.car = null;
+    parkHeroCar(G, 1000, 860, 0.05, '#9b59b6', 'sedan');
+    const M = G.missions;
+    M.active = { def: M.defs[1], leg: 1, timer: 132 };
+    G.dialogue = { lines: M.defs[1].intro, idx: 1, from: 'marisol', onDone: 'start' };
+    G.mode = 'dialogue';
+    G.cash = 720;
+  } else if (name === '4-night' || name === 'night') {
+    G.hour = 22.35;
+    G.player.x = 1470; G.player.y = 1410; G.player.angle = 0.4; G.player.car = null;
+    C.aimAngle = 0.35;
+    G.ammo.mag = 9;
+    parkHeroCar(G, 1390, 1330, Math.PI / 2, '#37e2ff', 'sedan');
+    const t1 = makeCar(G, 1428, 1080, Math.PI / 2, { kind: 'sedan', color: '#ecf0f1' });
+    t1.driver = 'traffic'; t1.dirX = 1; t1.dirY = 0; t1.speed = 110; G.cars.push(t1);
+    G.cash = 2210;
+    G.wanted.stars = 1; G.wanted.heat = 1.2;
+  }
+  // Snap camera onto the player for a stable frame.
+  G.camera.x = G.player.x - 640;
+  G.camera.y = G.player.y - 400;
+  return name;
 }
 
-function stageCover(state, stepGame) {
-  // Golden hour on the beachfront strip: the camera looks over the lot east
-  // of the last avenue — cafe blocks and their neon across the road, traffic
-  // rolling both ways, locals on the sidewalks, and the sand and sea closing
-  // the right edge of the frame. Jules stands by the car he just stepped
-  // out of, mid-frame, with the whole harbour waking up around him.
-  state.minutes = 18 * 60 + 36;
-  const p = state.player;
-  p.x = 2952; p.y = 486; p.angle = -0.35;
-  p.inCar = null;
-  // The car Jules just stepped out of, parked on the lot a few paces away.
-  const car = state.cars.find((c) => c.kind === 'parked');
-  if (car) {
-    car.x = 3002; car.y = 466; car.angle = 0.12;
-    car.vx = 0; car.vy = 0; car.speed = 0;
-    car.color = '#e74c3c';
-  }
-  // Traffic on the avenue, both directions, plus a car crossing on each street.
-  const traffic = state.cars.filter((c) => c.kind === 'traffic');
-  const marks = [
-    { dirX: 0, dirY: 1, x: 2797, y: 268 },
-    { dirX: 0, dirY: -1, x: 2835, y: 668 },
-    { dirX: 1, dirY: 0, x: 2590, y: 787 },
-    { dirX: -1, dirY: 0, x: 2700, y: 237 },
-  ];
-  const staged = marks.map((mark, i) => {
-    const t = traffic[i];
-    if (!t) return null;
-    Object.assign(t, mark);
-    t.angle = Math.atan2(mark.dirY, mark.dirX);
-    t.speed = t.cruise;
-    return { car: t, mark };
-  }).filter(Boolean);
-  // Locals strolling the avenue sidewalks, west and east.
-  const pedMarks = [
-    { x: 2756, y: 430 }, { x: 2754, y: 618 },
-    { x: 2876, y: 372 }, { x: 2877, y: 566 },
-  ];
-  const stagedPeds = pedMarks.map((mark, i) => {
-    const ped = state.peds[i];
-    if (!ped) return null;
-    ped.x = mark.x; ped.y = mark.y;
-    ped.state = 'walk'; ped.panic = 0;
-    ped.angle = i % 2 === 0 ? Math.PI / 2 : -Math.PI / 2;
-    return { ped, mark };
-  }).filter(Boolean);
-  stepN(state, IDLE, 36, stepGame);
-  // Re-pin everyone into their marks so the composition is exact.
-  p.x = 2952; p.y = 486; p.angle = -0.35;
-  if (car) { car.x = 3002; car.y = 466; car.angle = 0.12; car.speed = 0; car.vx = 0; car.vy = 0; }
-  for (const s of staged) {
-    s.car.x = s.mark.x; s.car.y = s.mark.y;
-    s.car.angle = Math.atan2(s.mark.dirY, s.mark.dirX);
-    s.car.speed = s.car.cruise;
-    s.car.vx = Math.cos(s.car.angle) * s.car.speed;
-    s.car.vy = Math.sin(s.car.angle) * s.car.speed;
-  }
-  for (const s of stagedPeds) {
-    s.ped.x = s.mark.x; s.ped.y = s.mark.y;
-    s.ped.state = 'walk'; s.ped.panic = 0; s.ped.fleeTime = 0; s.ped.startle = 0;
-  }
-  state.toast = null; // no pickup/crime toast may photobomb the cover
-  updateCamera(state, 0);
-}
-
-function stageChase(state, stepGame) {
-  state.minutes = 16 * 60 + 42;
-  // Mid-story context: the Heat Run's last leg, so the objective line agrees
-  // with the four stars and the cruisers on the player's tail.
-  const m = state.missions;
-  m.index = 3;
-  m.active = true;
-  m.stage = 2;
-  const car = putPlayerInCar(state, 1773, 1560, -Math.PI / 2, '#e74c3c');
-  car.speed = 250;
-  addCop(state, 1773, 1745, -Math.PI / 2);
-  addCop(state, 1830, 1835, -Math.PI / 2);
-  addCop(state, 1720, 1905, -Math.PI / 2);
-  // A pale delivery van ahead in the right lane: traffic to thread past,
-  // so the avenue reads as a living road and not an empty drag strip.
-  const van = state.cars.find((c) => c.kind === 'traffic');
-  if (van) {
-    van.dirX = 0; van.dirY = -1;
-    van.x = 1811; van.y = 1210; van.angle = -Math.PI / 2;
-    van.speed = 140; van.cruise = 140;
-    van.color = '#f7f3e8';
-  }
-  state.heat = 430;
-  stepN(state, DRIVE, 46, stepGame);
-  // Re-pin the pursuit into a readable diagonal after the run.
-  state.heat = 430;
-  const p = state.player;
-  if (p.inCar) {
-    p.inCar.x = 1773; p.inCar.y = 1420; p.inCar.angle = -Math.PI / 2;
-    p.inCar.vx = 0; p.inCar.vy = -250; p.inCar.speed = 250;
-    p.x = 1773; p.y = 1420;
-  }
-  state.cops.forEach((cop, i) => {
-    cop.x = 1752 + i * 52;
-    cop.y = 1510 + i * 74;
-    cop.angle = -Math.PI / 2;
-    cop.speed = 240;
-  });
-  if (van) {
-    van.x = 1811; van.y = 1150; van.angle = -Math.PI / 2;
-    van.speed = 140; van.vx = 0; van.vy = -140;
-  }
-  // Speed streaks and a kiss of tyre smoke sell the motion in a still frame.
-  for (let i = 0; i < 7; i += 1) {
-    state.particles.push({ x: 1773 + (i % 3 - 1) * 14, y: 1450 + i * 13, vx: 0, vy: 60, life: 0.5, max: 0.5, size: 3.4, color: 'rgba(255,255,255,0.65)', kind: 'smoke' });
-  }
-  state.shake = 2.5;
-  updateCamera(state, 0);
-}
-
-function stageMission(state, stepGame) {
-  state.minutes = 9 * 60 + 38;
-  const m = state.missions;
-  m.index = 1; // Hot Package
-  m.active = true;
-  m.stage = 0;
-  m.timer = 0;
-  startDialogue(state, m.defs[1].intro);
-  // Park the player's car on the lot itself, a short roll from the package point.
-  const stage = m.defs[1].stages[0];
-  putPlayerInCar(state, stage.x - 130, stage.y + 55, 0.5, '#f39c12');
-  stepN(state, IDLE, 24, stepGame);
-  const p = state.player;
-  if (p.inCar) { p.inCar.x = stage.x - 130; p.inCar.y = stage.y + 55; p.inCar.angle = 0.5; p.x = stage.x - 130; p.y = stage.y + 55; }
-  startDialogue(state, m.defs[1].intro);
-  state.dialogue.i = 1;
-  updateCamera(state, 0);
-}
-
-function stageNight(state, stepGame) {
-  state.minutes = 21 * 60 + 35;
-  const club = state.city.specials.club;
-  const p = state.player;
-  p.x = club.x + 40; p.y = club.y + 66;
-  p.angle = 0.65; p.aimAngle = 0.65;
-  stepN(state, IDLE, 30, stepGame);
-  p.x = club.x + 40; p.y = club.y + 66;
-  p.angle = 0.65; p.aimAngle = 0.65; p.aiming = true; p.muzzle = 0.05;
-  // A couple of startled locals mid-flee sell the drawn gun.
-  state.peds.slice(0, 3).forEach((ped, i) => {
-    ped.x = p.x + 90 + i * 42;
-    ped.y = p.y + 30 - i * 26;
-    ped.state = 'flee';
-    ped.fleeX = p.x; ped.fleeY = p.y;
-    ped.fleeTime = 3;
-    ped.panic = 1;
-  });
-  updateCamera(state, 0);
-}
-
-export function stageShot(name, state, stepGame) {
-  state.screen = 'play';
-  if (name === 'chase') stageChase(state, stepGame);
-  else if (name === 'mission') stageMission(state, stepGame);
-  else if (name === 'night') stageNight(state, stepGame);
-  else stageCover(state, stepGame);
-}
+export { CHARACTERS };

@@ -1,65 +1,47 @@
-// Vice Harbor — saving: cash, story progress, packages and where the player stood,
-// kept in localStorage. Wanted level is never saved — a fresh visit starts clean,
-// which is the harbour's one act of mercy.
-import { SAVE_KEY, START_CASH } from './config.js';
+// localStorage save/load. Guards every access: some embeds disable storage,
+// so the game must run fine with saving unavailable.
+const KEY = 'vice-harbor-save-v1';
+let memoryFallback = null;
 
-export function hasSave() {
+function store() {
   try {
-    return window.localStorage.getItem(SAVE_KEY) !== null;
-  } catch {
-    return false;
-  }
+    const s = window.localStorage;
+    const probe = '__vh_probe__';
+    s.setItem(probe, '1'); s.removeItem(probe);
+    return s;
+  } catch { return null; }
 }
 
-export function saveGame(state) {
-  const p = state.player;
+export function saveGame(G) {
   const data = {
-    cash: p.cash,
-    missionIndex: state.missions.index,
-    complete: state.missions.complete,
-    packages: state.packages.map((pack) => (pack.taken ? 1 : 0)),
-    packagesFound: p.packagesFound,
-    x: Math.round(p.inCar ? p.inCar.x : p.x),
-    y: Math.round(p.inCar ? p.inCar.y : p.y),
-    minutes: Math.round(state.minutes),
+    cash: G.cash,
+    missionIndex: G.missions.index,
+    packages: G.packagesFound,
+    player: { x: G.player.x, y: G.player.y },
+    hour: G.hour,
+    totalEarned: G.totalEarned,
+    faresDone: G.faresDone,
   };
-  try {
-    window.localStorage.setItem(SAVE_KEY, JSON.stringify(data));
-    return true;
-  } catch {
-    return false;
-  }
+  const s = store();
+  if (s) { try { s.setItem(KEY, JSON.stringify(data)); } catch { /* full/blocked */ } }
+  else memoryFallback = data;
+  return data;
 }
 
-export function loadGame(state) {
-  let data = null;
-  try {
-    data = JSON.parse(window.localStorage.getItem(SAVE_KEY) || 'null');
-  } catch {
-    data = null;
+export function loadGame() {
+  const s = store();
+  if (s) {
+    try {
+      const raw = s.getItem(KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
   }
-  if (!data) return false;
-  const p = state.player;
-  p.cash = Number.isFinite(data.cash) ? data.cash : START_CASH;
-  p.packagesFound = data.packagesFound || 0;
-  state.missions.index = Math.min(data.missionIndex || 0, state.missions.defs.length - 1);
-  state.missions.complete = Boolean(data.complete) && data.missionIndex >= state.missions.defs.length;
-  if (Array.isArray(data.packages)) {
-    state.packages.forEach((pack, i) => { pack.taken = data.packages[i] === 1; });
-  }
-  if (Number.isFinite(data.x) && Number.isFinite(data.y)) {
-    p.x = data.x;
-    p.y = data.y;
-  }
-  if (Number.isFinite(data.minutes)) state.minutes = data.minutes;
-  state.heat = 0;
-  return true;
+  return memoryFallback;
 }
 
 export function clearSave() {
-  try {
-    window.localStorage.removeItem(SAVE_KEY);
-  } catch {
-    // Storage unavailable: nothing to clear.
-  }
+  const s = store();
+  if (s) { try { s.removeItem(KEY); } catch { /* ignore */ } }
+  memoryFallback = null;
 }
+export function hasSave() { return !!loadGame(); }

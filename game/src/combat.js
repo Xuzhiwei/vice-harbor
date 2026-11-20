@@ -1,178 +1,108 @@
-// Vice Harbor — fighting: a swinging fist, a pistol that aims where the mouse points,
-// tracers and muzzle flash, and damage dealt to pedestrians, cruisers and car bodywork.
-import { PLAYER_RADIUS } from './config.js';
-import { dist } from './city.js';
-import { commitCrime, damageCop } from './police.js';
-import { damagePed, scarePeds } from './pedestrians.js';
-import { spawnSparks } from './vehicles.js';
+// Combat: mouse-aimed pistol with tracers, casings, muzzle flash and hit
+// markers, plus a short-range melee swing. Handles NPC and car damage.
+import { GUN, clamp, dist, angleTo } from './config.js';
+import { spawnParticles, pointInBuilding } from './world.js';
+import { hurtPed, scarePeds } from './pedestrians.js';
+import { damageCar } from './vehicles.js';
+import { reportCrime } from './police.js';
+import { sfx } from './audio.js';
 
-export const MAG_SIZE = 12;
-export const START_RESERVE = 36;
-const FIRE_INTERVAL = 0.21;
-const RELOAD_TIME = 1.15;
-const BULLET_SPEED = 940;
-const BULLET_RANGE = 560;
-
-export function createArmory() {
-  return { mag: MAG_SIZE, reserve: START_RESERVE, cooldown: 0, reload: 0 };
+export function createCombat() {
+  return { cooldown: 0, reloading: 0, muzzle: 0, hitmark: 0, aimAngle: 0 };
 }
 
-/** Swing at whatever stands in front of the player. */
-export function meleeSwing(state) {
-  const p = state.player;
-  if (p.inCar || p.meleeTime > 0) return;
-  p.meleeTime = 0.32;
-  state.audio?.swing();
-  const fx = Math.cos(p.angle);
-  const fy = Math.sin(p.angle);
-  const hx = p.x + fx * 30;
-  const hy = p.y + fy * 30;
-  for (const ped of state.peds) {
-    if (ped.state !== 'down' && dist(ped.x, ped.y, hx, hy) < 30) {
-      damagePed(state, ped, 16, p.x, p.y);
-      state.audio?.thud();
-      return;
+export function tryMelee(G, C) {
+  if (C.cooldown > 0 || G.player.car) return;
+  C.cooldown = 0.34;
+  sfx.melee();
+  const px = G.player.x, py = G.player.y;
+  for (const p of G.peds) {
+    if (!p.dead && dist(px, py, p.x, p.y) < 52) {
+      hurtPed(G, p, 34, p.x, p.y);
+      reportCrime(G, 'assault', p.x, p.y, 0.9);
+      C.hitmark = 0.18;
     }
   }
-  for (const car of state.cars) {
-    if (!car.dead && dist(car.x, car.y, hx, hy) < 34) {
-      car.health -= 7;
-      spawnSparks(state, hx, hy, 4);
-      state.audio?.thud();
-      if (car.kind !== 'player') commitCrime(state, 20, hx, hy, 'Vandalism reported!');
-      return;
-    }
-  }
+  scarePeds(G, px, py, 120, 'melee');
 }
 
-function fireBullet(state) {
-  const p = state.player;
-  const arm = state.armory;
-  arm.mag -= 1;
-  arm.cooldown = FIRE_INTERVAL;
-  // A held trigger walks wide: spread grows with the recoil still in the gun.
-  const spread = (Math.random() - 0.5) * (0.035 + p.recoil * 0.055);
-  const a = p.aimAngle + spread;
-  state.bullets.push({
-    x: p.x + Math.cos(p.aimAngle) * (PLAYER_RADIUS + 7),
-    y: p.y + Math.sin(p.aimAngle) * (PLAYER_RADIUS + 7),
-    vx: Math.cos(a) * BULLET_SPEED,
-    vy: Math.sin(a) * BULLET_SPEED,
-    life: BULLET_RANGE / BULLET_SPEED,
-  });
-  // A brass casing pops out of the ejection port and tumbles to the pavement.
-  state.particles.push({
-    x: p.x + Math.cos(p.aimAngle) * 12,
-    y: p.y + Math.sin(p.aimAngle) * 12,
-    vx: Math.cos(p.aimAngle + Math.PI / 2) * (30 + Math.random() * 26) - Math.cos(p.aimAngle) * 14,
-    vy: Math.sin(p.aimAngle + Math.PI / 2) * (30 + Math.random() * 26) - Math.sin(p.aimAngle) * 14,
-    life: 0.55, max: 0.55, size: 1.6, color: '#d9a441', kind: 'casing',
-    spin: Math.random() * 6,
-  });
-  p.muzzle = 0.05;
-  p.recoil = 1;
-  // The kick nudges Jules back a step; the next step's collision tidies it up.
-  p.x -= Math.cos(p.aimAngle) * 1.1;
-  p.y -= Math.sin(p.aimAngle) * 1.1;
-  state.audio?.gunshot();
-  scarePeds(state, p.x, p.y, 210);
-  commitCrime(state, 34, p.x, p.y, 'Shots fired!');
+export function tryShoot(G, C, aimX, aimY) {
+  if (G.player.car || C.cooldown > 0 || C.reloading > 0) return;
+  if (G.ammo.mag <= 0) { sfx.dryFire(); C.cooldown = 0.25; startReload(G, C); return; }
+  G.ammo.mag--;
+  G.stats.shotsFired++;
+  C.cooldown = GUN.fireInterval;
+  C.muzzle = 0.05;
+  const px = G.player.x, py = G.player.y;
+  const base = angleTo(px, py, aimX, aimY);
+  const a = base + (G.rng() - 0.5) * 2 * GUN.spread;
+  C.aimAngle = a;
+  sfx.gunshot();
+  G.shake = Math.max(G.shake, 1.6);
+  scarePeds(G, px, py, 300, 'gunfire');
+  reportCrime(G, 'gunfire', px, py, 0.7);
+
+  // Hitscan with building occlusion, sampled along the ray.
+  let endX = px + Math.cos(a) * GUN.range, endY = py + Math.sin(a) * GUN.range;
+  let hitSomething = false;
+  const steps = 46;
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    const x = px + (endX - px) * t, y = py + (endY - py) * t;
+    if (pointInBuilding(G, x, y, -2)) { endX = x; endY = y; hitSomething = true; spawnParticles(G, x, y, 4, '#d8cfc0', 110, 0.3, 2); break; }
+    let consumed = false;
+    for (const p of G.peds) {
+      if (!p.dead && dist(x, y, p.x, p.y) < 13) {
+        hurtPed(G, p, GUN.damage, x, y);
+        reportCrime(G, 'assault', x, y, 1);
+        C.hitmark = 0.18; sfx.hit();
+        endX = x; endY = y; hitSomething = true; consumed = true; break;
+      }
+    }
+    if (consumed) break;
+    for (const car of G.cars.concat(G.cops)) {
+      if (dist(x, y, car.x, car.y) < 24) {
+        damageCar(G, car, GUN.damage, x, y);
+        C.hitmark = 0.18; sfx.hit();
+        endX = x; endY = y; hitSomething = true; consumed = true; break;
+      }
+    }
+    if (consumed) break;
+  }
+  G.tracers.push({ x1: px + Math.cos(a) * 20, y1: py + Math.sin(a) * 20, x2: endX, y2: endY, life: 0.07 });
+  G.casings.push({ x: px, y: py, vx: Math.cos(a + Math.PI / 2) * 60, vy: Math.sin(a + Math.PI / 2) * 60 - 40, life: 0.7 });
+  if (!hitSomething) spawnParticles(G, endX, endY, 2, '#ffe9a8', 60, 0.2, 1.6);
+  if (G.ammo.mag === 0) startReload(G, C);
 }
 
-export function updateCombat(state, input, dt) {
-  const p = state.player;
-  const arm = state.armory;
-  arm.cooldown = Math.max(0, arm.cooldown - dt);
-  p.muzzle = Math.max(0, p.muzzle - dt);
-  p.meleeTime = Math.max(0, p.meleeTime - dt);
-  // Recoil lingers a while, so a long burst walks wider than a careful pair.
-  p.recoil = Math.max(0, p.recoil - dt * 2.6);
-  if (state.hitmark) {
-    state.hitmark.t -= dt;
-    if (state.hitmark.t <= 0) state.hitmark = null;
-  }
+export function startReload(G, C) {
+  if (C.reloading > 0 || G.ammo.reserve <= 0 || G.ammo.mag >= GUN.magSize) return;
+  C.reloading = GUN.reloadTime;
+  sfx.reload();
+}
 
-  if (arm.reload > 0) {
-    arm.reload -= dt;
-    if (arm.reload <= 0) {
-      const take = Math.min(MAG_SIZE - arm.mag, arm.reserve);
-      arm.mag += take;
-      arm.reserve -= take;
+export function updateCombat(G, C, dt) {
+  C.cooldown = Math.max(0, C.cooldown - dt);
+  C.muzzle = Math.max(0, C.muzzle - dt);
+  C.hitmark = Math.max(0, C.hitmark - dt);
+  if (C.reloading > 0) {
+    C.reloading -= dt;
+    if (C.reloading <= 0) {
+      const need = GUN.magSize - G.ammo.mag;
+      const take = Math.min(need, G.ammo.reserve);
+      G.ammo.mag += take; G.ammo.reserve -= take;
     }
-  }
-
-  p.aiming = false;
-  if (!p.inCar && state.screen === 'play') {
-    const mouse = input.mouse();
-    const worldMouseX = state.camera.x + mouse.x;
-    const worldMouseY = state.camera.y + mouse.y;
-    p.aimAngle = Math.atan2(worldMouseY - p.y, worldMouseX - p.x);
-    if (mouse.down) {
-      p.aiming = true;
-      p.angle = p.aimAngle;
-      if (arm.reload <= 0 && arm.cooldown <= 0) {
-        if (arm.mag > 0) fireBullet(state);
-        else if (arm.reserve > 0) startReload(state);
-        else {
-          // An empty gun clicks — but not sixty times a second.
-          state.audio?.dryFire();
-          arm.cooldown = 0.28;
-        }
-      }
-    }
-  }
-
-  // Bullets fly, and stop at the first body, car or wall they meet.
-  for (let i = state.bullets.length - 1; i >= 0; i -= 1) {
-    const b = state.bullets[i];
-    b.x += b.vx * dt;
-    b.y += b.vy * dt;
-    b.life -= dt;
-    let hit = b.life <= 0;
-    if (!hit) {
-      for (const ped of state.peds) {
-        if (ped.state !== 'down' && dist(ped.x, ped.y, b.x, b.y) < 11) {
-          damagePed(state, ped, 34, p.x, p.y);
-          state.hitmark = { x: b.x, y: b.y, t: 0.22, kill: ped.state === 'down' };
-          hit = true;
-          break;
-        }
-      }
-    }
-    if (!hit) {
-      for (const car of state.cars) {
-        if (car.dead || car === p.inCar) continue;
-        if (dist(car.x, car.y, b.x, b.y) < 23) {
-          if (car.kind === 'cop') damageCop(state, car, 26);
-          else {
-            car.health -= 22;
-            commitCrime(state, 26, b.x, b.y, 'You shot up a car!');
-            if (car.health <= 0) { car.dead = true; spawnSparks(state, car.x, car.y, 10); }
-          }
-          spawnSparks(state, b.x, b.y, 3);
-          state.hitmark = { x: b.x, y: b.y, t: 0.22, kill: car.dead };
-          hit = true;
-          break;
-        }
-      }
-    }
-    if (!hit) {
-      for (const wall of state.city.buildings) {
-        if (b.x > wall.x && b.x < wall.x + wall.w && b.y > wall.y && b.y < wall.y + wall.h) {
-          spawnSparks(state, b.x, b.y, 2);
-          hit = true;
-          break;
-        }
-      }
-    }
-    if (hit) state.bullets.splice(i, 1);
   }
 }
 
-export function startReload(state) {
-  const arm = state.armory;
-  if (arm.reload <= 0 && arm.mag < MAG_SIZE && arm.reserve > 0) {
-    arm.reload = RELOAD_TIME;
-    state.audio?.reload();
+export function hurtPlayer(G, amount) {
+  if (G.player.dead || G.mode !== 'play') return;
+  G.player.health -= amount;
+  G.shake = Math.max(G.shake, 2.5);
+  if (G.player.health <= 0) {
+    G.player.health = 0; G.player.dead = true;
+    G.mode = 'wasted';
+    sfx.wasted();
+    G.wastedT = 0;
   }
 }
