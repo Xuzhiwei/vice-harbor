@@ -160,6 +160,13 @@ export function drawCar(ctx, car, G, night) {
   ctx.fillRect(-w / 2 + 4, -h / 2 + 6, w, h);
   ctx.fillStyle = car.dead ? '#3a3a3a' : car.color;
   roundRect(ctx, -w / 2, -h / 2, w, h, 7); ctx.fill();
+  // parked-car liveries: racing stripe, two-tone lower half, rust patches
+  if (car.livery === 'stripe') { ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fillRect(-w / 2 + 4, -3, w - 8, 6); }
+  else if (car.livery === 'twotone') { ctx.fillStyle = 'rgba(15,18,26,0.5)'; ctx.fillRect(-w / 2 + 1, 0, w - 2, h / 2 - 1); }
+  else if (car.livery === 'rusty') {
+    ctx.fillStyle = 'rgba(122,72,32,0.55)';
+    ctx.fillRect(-w * 0.32, -h / 2 + 2, 12, 6); ctx.fillRect(w * 0.1, h / 2 - 8, 14, 6); ctx.fillRect(w * 0.28, -h / 2 + 3, 7, 5);
+  }
   // cabin + glass
   ctx.fillStyle = 'rgba(20,28,44,0.9)';
   roundRect(ctx, -w * 0.12, -h * 0.36, w * 0.34, h * 0.72, 5); ctx.fill();
@@ -197,6 +204,94 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
   ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r);
   ctx.closePath();
+}
+
+// The buyable garage: a roller-door front on the east lot, facing the
+// avenue. Drawn over the lot so the door and its neon sign always read.
+function drawGarage(ctx, G, night) {
+  const gp = G.city.places.garage;
+  if (!gp) return;
+  const owned = G.garage && G.garage.owned;
+  const x = gp.x - 17, y = gp.y - 62, w = 30, h = 124;
+  ctx.fillStyle = 'rgba(40,20,10,0.25)';
+  ctx.fillRect(x + 5, y + 7, w, h);
+  ctx.fillStyle = owned ? '#5d6b7a' : '#6b7280';
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = 'rgba(20,22,28,0.55)'; ctx.lineWidth = 2;
+  for (let sy = y + 11; sy < y + h - 2; sy += 12) { ctx.beginPath(); ctx.moveTo(x + 2, sy); ctx.lineTo(x + w - 2, sy); ctx.stroke(); }
+  ctx.fillStyle = '#374151';
+  ctx.fillRect(x - 3, y - 8, w + 6, 9);
+  ctx.save();
+  ctx.shadowColor = owned ? '#37e2ff' : '#ffb340'; ctx.shadowBlur = night > 0.2 ? 14 : 7;
+  ctx.fillStyle = owned ? '#37e2ff' : '#ffb340';
+  ctx.font = 'bold 13px system-ui, sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText(owned ? 'YOUR GARAGE' : 'GARAGE $1,500', gp.x + 30, y - 15);
+  ctx.restore();
+  if (owned && G.garage.storedCar) {
+    ctx.fillStyle = '#37e2ff';
+    ctx.beginPath(); ctx.arc(x + w / 2, y + h + 9, 3.5 + Math.sin(G.time * 4) * 0.8, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+// Police helicopter: searchlight cone + pool on the ground, an offset
+// shadow to sell the altitude, then the airframe with its spinning rotor.
+function drawHeli(ctx, G, night) {
+  const h = G.heli;
+  if (!h) return;
+  const pulse = 0.85 + Math.sin(G.time * 7) * 0.08;
+  const alpha = (h.seesYou ? 0.36 : 0.24) * pulse * (0.58 + night * 0.42);
+  // cone from the aircraft down to the pool
+  ctx.fillStyle = `rgba(255,246,200,${alpha * 0.22})`;
+  ctx.beginPath();
+  ctx.moveTo(h.x - 9, h.y + 6); ctx.lineTo(h.spotX - 58, h.spotY);
+  ctx.lineTo(h.spotX + 58, h.spotY); ctx.lineTo(h.x + 9, h.y + 6);
+  ctx.closePath(); ctx.fill();
+  // light pool where the crew is looking
+  const sg = ctx.createRadialGradient(h.spotX, h.spotY, 8, h.spotX, h.spotY, 105);
+  sg.addColorStop(0, `rgba(255,246,200,${alpha})`);
+  sg.addColorStop(0.7, `rgba(255,246,200,${alpha * 0.45})`);
+  sg.addColorStop(1, 'rgba(255,246,200,0)');
+  ctx.fillStyle = sg;
+  ctx.beginPath(); ctx.arc(h.spotX, h.spotY, 105, 0, Math.PI * 2); ctx.fill();
+  // ground shadow, offset like a high shadow
+  ctx.fillStyle = 'rgba(30,20,10,0.30)';
+  ctx.beginPath(); ctx.ellipse(h.x + 30, h.y + 38, 34, 13, 0, 0, Math.PI * 2); ctx.fill();
+  // airframe
+  ctx.save();
+  ctx.translate(h.x, h.y);
+  ctx.rotate(h.angle);
+  ctx.fillStyle = '#22303e';
+  ctx.fillRect(-46, -3.5, 30, 7);            // tail boom
+  ctx.fillRect(-49, -9, 5, 18);              // tail fin
+  ctx.strokeStyle = 'rgba(220,230,240,0.65)'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(-49, -8); ctx.lineTo(-49, 8); ctx.stroke(); // tail rotor flicker
+  ctx.fillStyle = '#2e4256';
+  roundRect(ctx, -18, -11, 38, 22, 10); ctx.fill();
+  ctx.fillStyle = '#f4f6f8';
+  ctx.fillRect(-3, -11, 13, 22);             // white cheatline band
+  ctx.fillStyle = '#10151c'; ctx.font = 'bold 7px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('VHPD', 3.5, 2.5);
+  ctx.fillStyle = 'rgba(160,215,250,0.9)';
+  ctx.beginPath(); ctx.arc(15.5, 0, 6, 0, Math.PI * 2); ctx.fill(); // cockpit glass
+  ctx.strokeStyle = '#141a21'; ctx.lineWidth = 2.4;
+  ctx.beginPath(); ctx.moveTo(-10, -15); ctx.lineTo(14, -15); ctx.moveTo(-10, 15); ctx.lineTo(14, 15); ctx.stroke(); // skids
+  // main rotor: blurred disc + two spinning blade lines
+  ctx.fillStyle = 'rgba(200,215,228,0.18)';
+  ctx.beginPath(); ctx.arc(0, 0, 46, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = 'rgba(230,238,245,0.5)'; ctx.lineWidth = 3;
+  const ra = G.time * 31;
+  for (const off of [0, Math.PI / 2]) {
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(ra + off) * -44, Math.sin(ra + off) * -44);
+    ctx.lineTo(Math.cos(ra + off) * 44, Math.sin(ra + off) * 44);
+    ctx.stroke();
+  }
+  if (Math.sin(G.time * 9) > 0.4) {
+    ctx.fillStyle = '#ff3b30'; ctx.shadowColor = '#ff3b30'; ctx.shadowBlur = 12;
+    ctx.beginPath(); ctx.arc(-2, 0, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+  ctx.restore();
 }
 
 export function drawPed(ctx, p, G) {
@@ -276,6 +371,7 @@ export function renderWorld(ctx, G, C, viewW, viewH) {
   }
   drawPalms(ctx, G);
   drawBuildings(ctx, G, camRect, night);
+  drawGarage(ctx, G, night);
   // lamps glow pools at night
   if (night > 0.25) {
     for (const l of G.city.lamps) {
@@ -304,9 +400,10 @@ export function renderWorld(ctx, G, C, viewW, viewH) {
   // entities
   for (const car of G.cars) drawCar(ctx, car, G, night);
   for (const cop of G.cops) drawCar(ctx, cop, G, night);
-  for (const p of G.peds) drawPed(ctx, p, G);
+  for (const p of G.peds) { if (!p.hidden) drawPed(ctx, p, G); }
   if (G.player.car) drawCar(ctx, G.player.car, G, night);
   drawPlayer(ctx, G, C);
+  drawHeli(ctx, G, night);
   // tracers, casings, particles
   for (const t of G.tracers) {
     ctx.strokeStyle = 'rgba(255,230,150,0.9)'; ctx.lineWidth = 2;

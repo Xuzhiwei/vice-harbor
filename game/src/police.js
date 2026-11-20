@@ -1,7 +1,7 @@
 // Wanted system and police: crimes raise heat when witnessed, cruisers
 // spawn at the city edge of vision, pursue with last-seen memory, ram and
 // pin the player, and fill the BUSTED meter on sustained close contact.
-import { WANTED, clamp, dist, angleTo, wrapAngle } from './config.js';
+import { WANTED, HELI, clamp, dist, angleTo, wrapAngle } from './config.js';
 import { hasLineOfSight, respawnAtHospital, setBanner, collideCircle } from './world.js';
 import { makeCar, damageCar } from './vehicles.js';
 import { sfx } from './audio.js';
@@ -32,6 +32,65 @@ export function forceStars(G, n) {
   G.wanted.lastSeenT = G.time;
 }
 
+// Police helicopter --------------------------------------------------------
+// Air support joins at HELI.minStars. It is pressure, not a weapon: it
+// never shoots and never lands — it shadows you, and while its crew has
+// eyes on you the last-seen point stays fresh and the heat cannot decay.
+// Break its line of sight (duck behind a building) and it hunts the
+// last-seen point like everyone else; cool the stars and it peels off.
+function spawnHeli(G) {
+  const a = G.rng() * Math.PI * 2;
+  G.heli = {
+    x: clamp(G.wanted.lastSeenX + Math.cos(a) * 720, 120, 2920),
+    y: clamp(G.wanted.lastSeenY + Math.sin(a) * 720, 100, 2300),
+    angle: 0, orbit: G.rng() * Math.PI * 2, leaving: false,
+    spotX: G.wanted.lastSeenX, spotY: G.wanted.lastSeenY, seesYou: false,
+  };
+  setBanner(G, 'VHPD air support is on you — break its line of sight.');
+}
+
+// Returns true when the helicopter currently sees the player.
+export function updateHeli(G, dt) {
+  const w = G.wanted;
+  if (!G.heli) {
+    if (w.stars >= HELI.minStars) spawnHeli(G);
+    return false;
+  }
+  const h = G.heli;
+  const px = G.player.car ? G.player.car.x : G.player.x;
+  const py = G.player.car ? G.player.car.y : G.player.y;
+  if (w.stars >= HELI.minStars) h.leaving = false;
+  else if (w.stars <= HELI.leaveStars) h.leaving = true;
+
+  // Where it wants to hover: circling the freshest anchor (the player
+  // while the memory is live, else the last-seen point), or home once
+  // it peels off.
+  let tx, ty;
+  if (h.leaving) { tx = -300; ty = h.y; }
+  else {
+    h.orbit += dt * 0.55;
+    const fresh = G.time - w.lastSeenT < WANTED.seenMemory;
+    const ax = fresh ? w.lastSeenX : px, ay = fresh ? w.lastSeenY : py;
+    tx = ax + Math.cos(h.orbit) * HELI.orbitRadius;
+    ty = ay + Math.sin(h.orbit) * HELI.orbitRadius;
+  }
+  const d = dist(h.x, h.y, tx, ty);
+  if (d > 4) {
+    const step = Math.min(d, HELI.speed * dt);
+    h.x += ((tx - h.x) / d) * step;
+    h.y += ((ty - h.y) / d) * step;
+    h.angle = angleTo(0, 0, tx - h.x, ty - h.y);
+  }
+  if (h.leaving && h.x < -200) { G.heli = null; return false; }
+
+  h.seesYou = !h.leaving && dist(h.x, h.y, px, py) < HELI.sightRange && hasLineOfSight(G, h.x, h.y, px, py);
+  // The spotlight tracks the player when seen, else sweeps last-seen.
+  const sx = h.seesYou ? px : w.lastSeenX, sy = h.seesYou ? py : w.lastSeenY;
+  h.spotX += (sx - h.spotX) * Math.min(1, dt * 3.2);
+  h.spotY += (sy - h.spotY) * Math.min(1, dt * 3.2);
+  return h.seesYou;
+}
+
 function desiredCops(G) { return G.wanted.stars <= 0 ? 0 : Math.min(2 + G.wanted.stars, 7); }
 
 function spawnCop(G) {
@@ -51,11 +110,13 @@ export function updatePolice(G, dt) {
   const px = G.player.car ? G.player.car.x : G.player.x;
   const py = G.player.car ? G.player.car.y : G.player.y;
 
-  // Vision: any cop with LOS refreshes last-seen; otherwise memory fades.
+  // Vision: any cop — or the helicopter — with LOS refreshes last-seen;
+  // otherwise memory fades. The heli's gaze also pins the heat in place.
   let seen = false;
   for (const c of G.cops) {
     if (!c.dead && dist(c.x, c.y, px, py) < 430 && hasLineOfSight(G, c.x, c.y, px, py)) seen = true;
   }
+  if (updateHeli(G, dt)) seen = true;
   if (seen) { w.lastSeenX = px; w.lastSeenY = py; w.lastSeenT = G.time; w.unseenT = 0; }
   else w.unseenT += dt;
 

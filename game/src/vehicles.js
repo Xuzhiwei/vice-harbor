@@ -6,7 +6,8 @@ import { collideCircle, spawnParticles } from './world.js';
 import { sfx } from './audio.js';
 import { reportCrime } from './police.js';
 
-const CAR_COLORS = ['#e74c3c', '#3498db', '#f1c40f', '#ecf0f1', '#9b59b6', '#1abc9c', '#e67e22', '#95a5a6', '#ff6b9d', '#48dbfb'];
+const CAR_COLORS = ['#e74c3c', '#3498db', '#f1c40f', '#ecf0f1', '#9b59b6', '#1abc9c', '#e67e22', '#95a5a6', '#ff6b9d', '#48dbfb', '#ff9f43', '#00d2d3', '#54a0ff', '#fd79a8', '#2ecc71'];
+const PARKED_LIVERIES = [null, null, null, 'stripe', 'twotone', 'rusty'];
 const CAR_KINDS = [
   { kind: 'sedan', w: 44, h: 21, top: 400 },
   { kind: 'taxi', w: 44, h: 21, top: 400, color: '#f7b731' },
@@ -22,6 +23,7 @@ export function makeCar(G, x, y, angle, opts = {}) {
     id: nextCarId++, x, y, angle, vx: 0, vy: 0, speed: 0, steer: 0,
     w: base.w, h: base.h, topSpeed: base.top, kind: base.kind,
     color: opts.color || base.color || pick(G.rng, CAR_COLORS),
+    livery: opts.livery || null, // stripe | twotone | rusty (drawn by render.js)
     health: 100, driver: opts.driver || 'traffic', // traffic | player | cop | parked | none
     // traffic route state
     dirX: Math.round(Math.cos(angle)), dirY: Math.round(Math.sin(angle)),
@@ -84,7 +86,8 @@ export function spawnTraffic(G, count) {
       dirY = G.rng() < 0.5 ? 1 : -1;
       y = sy + (dirY > 0 ? -LANE : LANE); x = 140 + G.rng() * 2400;
     }
-    const car = makeCar(G, x, y, Math.atan2(dirX, -dirY) + Math.PI / 2, {});
+    // Every fifth traffic car is a cab, so the yellow livery is a fixture.
+    const car = makeCar(G, x, y, Math.atan2(dirX, -dirY) + Math.PI / 2, i % 5 === 3 ? { kind: 'taxi' } : {});
     car.angle = dirX !== 0 ? (dirX > 0 ? Math.PI / 2 : -Math.PI / 2) : (dirY > 0 ? 0 : Math.PI);
     car.dirX = dirX; car.dirY = dirY; car.turnCooldown = G.rng() * 2;
     car.speed = car.cruise * 0.7;
@@ -94,7 +97,7 @@ export function spawnTraffic(G, count) {
   for (const lot of G.city.lots) {
     const n = 3 + Math.floor(G.rng() * 5);
     for (let i = 0; i < n; i++) {
-      const car = makeCar(G, lot.x + 34 + (i % 4) * 58, lot.y + 40 + Math.floor(i / 4) * 62, -Math.PI / 2, {});
+      const car = makeCar(G, lot.x + 34 + (i % 4) * 58, lot.y + 40 + Math.floor(i / 4) * 62, -Math.PI / 2, { livery: pick(G.rng, PARKED_LIVERIES) });
       car.driver = 'parked'; car.speed = 0;
       G.cars.push(car);
     }

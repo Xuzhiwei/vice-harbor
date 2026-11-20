@@ -9,27 +9,33 @@ import { sfx } from './audio.js';
 const SHIRTS = ['#ff6b81', '#feca57', '#48dbfb', '#1dd1a1', '#f368e0', '#ff9f43', '#54a0ff', '#5f27cd', '#c8d6e5', '#fd79a8'];
 const SKINS = ['#f1c27d', '#e0ac69', '#c68642', '#8d5524', '#ffdbac'];
 
-export function spawnPeds(G, count = 45) {
-  for (let i = 0; i < count; i++) {
-    const vertical = G.rng() < 0.55;
-    const side = G.rng() < 0.5 ? -1 : 1;
-    let x, y;
-    if (vertical) {
-      const ax = pick(G.rng, AVENUES);
-      x = ax + side * sidewalkOffset(); y = 100 + G.rng() * 2200;
-    } else {
-      const sy = pick(G.rng, STREETS);
-      y = sy + side * (STREET_W / 2 + 15); x = 120 + G.rng() * 2500;
-    }
-    G.peds.push({
-      x, y, angle: G.rng() * Math.PI * 2, speed: 0,
-      walkSpeed: 52 + G.rng() * 42, phase: G.rng() * 9,
-      shirt: pick(G.rng, SHIRTS), skin: pick(G.rng, SKINS),
-      health: 100, dead: false, state: 'stroll', panicT: 0,
-      targetX: x, targetY: y, retargetT: G.rng() * 4, vertical, side,
-      screamT: 0,
-    });
+function spawnOnePed(G, evening) {
+  const vertical = G.rng() < 0.55;
+  const side = G.rng() < 0.5 ? -1 : 1;
+  let x, y;
+  if (vertical) {
+    const ax = pick(G.rng, AVENUES);
+    x = ax + side * sidewalkOffset(); y = 100 + G.rng() * 2200;
+  } else {
+    const sy = pick(G.rng, STREETS);
+    y = sy + side * (STREET_W / 2 + 15); x = 120 + G.rng() * 2500;
   }
+  G.peds.push({
+    x, y, angle: G.rng() * Math.PI * 2, speed: 0,
+    walkSpeed: 52 + G.rng() * 42, phase: G.rng() * 9,
+    shirt: pick(G.rng, SHIRTS), skin: pick(G.rng, SKINS),
+    health: 100, dead: false, state: 'stroll', panicT: 0,
+    targetX: x, targetY: y, retargetT: G.rng() * 4, vertical, side,
+    screamT: 0, evening, hidden: false,
+  });
+}
+
+export function spawnPeds(G, count = 45) {
+  for (let i = 0; i < count; i++) spawnOnePed(G, false);
+  // Evening crowd: extra walkers who only come out from late afternoon
+  // to late night, when the neon is on — the streets feel busier at dusk.
+  const eveningCount = Math.round(count * 0.35);
+  for (let i = 0; i < eveningCount; i++) spawnOnePed(G, true);
 }
 
 function pickStrollTarget(G, p) {
@@ -73,6 +79,11 @@ export function updatePeds(G, dt) {
   const playerSpeed = G.player.car ? Math.abs(G.player.car.speed) : 0;
   for (const p of G.peds) {
     if (p.dead) continue;
+    // The evening crowd keeps evening hours: out 16:30–23:36, else home.
+    if (p.evening) {
+      p.hidden = !(G.hour >= 16.5 && G.hour <= 23.6);
+      if (p.hidden) continue;
+    }
     // Danger sense: fast car or armed chaos nearby
     const nearCar = G.player.car && dist(p.x, p.y, G.player.car.x, G.player.car.y) < 90 && playerSpeed > 200;
     if (nearCar && p.state !== 'flee') { p.state = 'flee'; p.panicT = 1.4; p.fleeX = G.player.car.x; p.fleeY = G.player.car.y; }

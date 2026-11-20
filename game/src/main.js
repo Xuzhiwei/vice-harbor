@@ -3,8 +3,8 @@
 // title / pause / busted / wasted flow, and the ?shot= staging mode.
 import { DAY_LENGTH, clamp, dist, angleTo } from './config.js';
 import { initInput, keys, pressed, mouse, endFrameInput, axisX, axisY, sprintHeld, handbrakeHeld } from './input.js';
-import { createWorld, updateParticles, respawnAtHospital, setToast, collideCircle } from './world.js';
-import { spawnTraffic, nearestEnterableCar, enterCar, exitCar, updateVehicles } from './vehicles.js';
+import { createWorld, updateParticles, respawnAtHospital, setToast, setBanner, collideCircle } from './world.js';
+import { spawnTraffic, nearestEnterableCar, enterCar, exitCar, updateVehicles, makeCar } from './vehicles.js';
 import { spawnPeds, updatePeds } from './pedestrians.js';
 import { updatePolice } from './police.js';
 import { createCombat, tryShoot, tryMelee, startReload, updateCombat, hurtPlayer } from './combat.js';
@@ -52,6 +52,10 @@ function applySave(data) {
   if (typeof data.missionIndex === 'number') {
     G.missions.index = clamp(data.missionIndex, 0, G.missions.defs.length);
     if (G.missions.index >= G.missions.defs.length) G.missions.complete = true;
+  }
+  if (data.garage) {
+    G.garage.owned = !!data.garage.owned;
+    G.garage.storedCar = data.garage.storedCar || null;
   }
 }
 
@@ -116,10 +120,73 @@ function updatePlayerOnFoot(dt) {
   collideCircle(G, p, p.radius);
 }
 
+// Garage: buy the Harbor Garage once, then E at its door stores the car
+// you left beside it (or rolls the stored one out), and E while seated at
+// the door repairs your ride — $10 per 10 HP, to full.
+const GARAGE_PRICE = 1500;
+function repairCost(car) { return Math.ceil(Math.max(0, 100 - car.health) / 10) * 10; }
+
+function garageAction() {
+  const gp = G.city.places.garage;
+  const gr = G.garage;
+  const p = G.player;
+  if (p.car) {
+    if (!gr.owned) return false; // not yours: E still just gets out
+    const cost = repairCost(p.car);
+    if (cost <= 0) { setToast(G, 'Your car is already pristine.'); return true; }
+    if (G.cash < cost) { setToast(G, `Repairs cost $${cost} — you are short.`); return true; }
+    G.cash -= cost;
+    p.car.health = 100;
+    setBanner(G, `Repaired to full — $${cost}`);
+    sfx.cash();
+    G.saveNow = true;
+    return true;
+  }
+  if (!gr.owned) {
+    if (G.cash >= GARAGE_PRICE) {
+      G.cash -= GARAGE_PRICE;
+      gr.owned = true;
+      setBanner(G, 'Harbor Garage is yours — store a car at the door, repairs while seated.');
+      sfx.cash();
+      G.saveNow = true;
+    } else setToast(G, `The garage costs $${GARAGE_PRICE.toLocaleString('en-US')} — come back richer.`);
+    return true;
+  }
+  let loose = null;
+  for (const car of G.cars) {
+    if (!car.dead && car.driver === 'none' && dist(car.x, car.y, gp.x, gp.y) < 115) { loose = car; break; }
+  }
+  if (loose && !gr.storedCar) {
+    gr.storedCar = { kind: loose.kind, color: loose.color, health: Math.round(loose.health), livery: loose.livery || null };
+    G.cars.splice(G.cars.indexOf(loose), 1);
+    setBanner(G, 'Car stored in your garage.');
+    sfx.door();
+    G.saveNow = true;
+  } else if (!loose && gr.storedCar) {
+    const s = gr.storedCar;
+    const car = makeCar(G, gp.x - 64, gp.y, Math.PI, { kind: s.kind, color: s.color });
+    car.health = s.health; car.livery = s.livery; car.driver = 'none';
+    G.cars.push(car);
+    gr.storedCar = null;
+    setBanner(G, 'Your stored car rolls out.');
+    sfx.door();
+    G.saveNow = true;
+  } else if (loose && gr.storedCar) {
+    setToast(G, 'The garage holds one car — take the stored one out first.');
+  } else {
+    setToast(G, 'Garage is empty — leave a car by the door and press E.');
+  }
+  return true;
+}
+
 function handleInteractions() {
   const p = G.player;
+  const gp = G.city.places.garage;
+  const atDoorInCar = p.car && G.garage.owned && dist(p.car.x, p.car.y, gp.x, gp.y) < 105;
+  const atDoorOnFoot = !p.car && dist(p.x, p.y, gp.x, gp.y) < 82;
   if (pressed['e']) {
-    if (p.car) exitCar(G);
+    if ((atDoorInCar || atDoorOnFoot) && garageAction()) { /* handled at the door */ }
+    else if (p.car) exitCar(G);
     else {
       const car = nearestEnterableCar(G);
       if (car) enterCar(G, car);
@@ -132,10 +199,15 @@ function handleInteractions() {
     const aimWX = G.camera.x + mouse.x, aimWY = G.camera.y + mouse.y;
     tryShoot(G, C, aimWX, aimWY);
   }
-  // interact hint
-  const near = !p.car && nearestEnterableCar(G, 52);
-  H.interact.style.display = near ? 'block' : 'none';
-  if (near) H.interact.textContent = 'E — enter vehicle';
+  // interact hint: garage contexts outrank the plain enter-car hint
+  let hint = null;
+  if (atDoorInCar && p.car.health < 100) hint = `E — repair car ($${repairCost(p.car)})`;
+  else if (atDoorOnFoot && !G.garage.owned) hint = `E — buy Harbor Garage ($${GARAGE_PRICE.toLocaleString('en-US')})`;
+  else if (atDoorOnFoot && G.garage.storedCar) hint = 'E — take your stored car out';
+  else if (atDoorOnFoot) hint = 'E — store the car by the door';
+  else if (!p.car && nearestEnterableCar(G, 52)) hint = 'E — enter vehicle';
+  H.interact.style.display = hint ? 'block' : 'none';
+  if (hint) H.interact.textContent = hint;
 }
 
 function update(dt) {

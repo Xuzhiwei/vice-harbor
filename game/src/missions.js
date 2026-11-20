@@ -1,5 +1,5 @@
 // Story missions, characters, phone dialogue, taxi fares and packages.
-// Six-mission chain (~$3,000 total) from five original Vice Harbor locals.
+// Eight-mission chain (~$4,450 total) from five original Vice Harbor locals.
 import { dist, clamp } from './config.js';
 import { addCash, setBanner, setToast } from './world.js';
 import { forceStars, reportCrime } from './police.js';
@@ -74,7 +74,25 @@ export function missionDefs(G) {
       outro: [['kiko', 'You move like tide water. The marina remembers its friends.']],
     },
     {
-      id: 'm5', from: 'rosa', title: 'Encore',
+      id: 'm5', from: 'kiko', title: 'Harbour Grand Prix',
+      intro: [
+        ['kiko', 'Rio. The marina crews run an unsanctioned grand prix when the moon is right. Tonight is right.'],
+        ['kiko', 'Four checkpoints, the whole harbour, a clock on every leg. My money is on you — do not make me poor.'],
+        ['rio', 'And if the VHPD enter themselves?'],
+        ['kiko', 'Then win faster. The start line is here at the marina. Bring a quick car.'],
+      ],
+      legs: [
+        { text: 'Reach the start line at the marina', x: P.marina.x, y: P.marina.y, r: 95 },
+        { text: 'Checkpoint 1 — Sundial Tower', x: P.tower.x, y: P.tower.y, r: 95, needCar: true, timer: 80 },
+        { text: 'Checkpoint 2 — Flamingo Tower', x: 460, y: 460, r: 95, needCar: true, timer: 95 },
+        { text: 'Checkpoint 3 — Harbor General', x: P.hospital.x, y: P.hospital.y, r: 95, needCar: true, timer: 100 },
+        { text: 'Finish — back to the marina', x: P.marina.x, y: P.marina.y, r: 100, needCar: true, timer: 115 },
+      ],
+      reward: 600,
+      outro: [['kiko', 'Harbour Grand Prix champion. The crews will talk about that last leg for a year.']],
+    },
+    {
+      id: 'm6', from: 'rosa', title: 'Encore',
       intro: [
         ['rosa', 'Rosa, Sunset Records. My headline singer is hiding at the Flamingo Tower — stage fright, or worse.'],
         ['rosa', 'Get her to the Copa before doors. Every copper in Vice Harbor will want a selfie. Avoid them.'],
@@ -87,7 +105,25 @@ export function missionDefs(G) {
       outro: [['rosa', 'She sang like sunrise. You\'re on the guest list forever, Rio.']],
     },
     {
-      id: 'm6', from: 'marisol', title: 'Vice Harbor',
+      id: 'm7', from: 'rosa', title: 'Three Drops',
+      intro: [
+        ['rosa', 'Encore favour, Rio. Three dead drops keep my tour funded — vinyl money, nothing heavier.'],
+        ['rosa', 'Pier 9, the Sundial stairs, Harbor General. Each pickup gets louder. By the third, expect company.'],
+        ['rio', 'And delivery?'],
+        ['rosa', 'Back to me at the Copa. Quick hands, quiet tyres — until they are not.'],
+      ],
+      legs: [
+        { text: 'Meet Rosa at the Copa Cabana', x: P.club.x, y: P.club.y, r: 90 },
+        { text: 'Drop one — Pier 9 Warehouse', x: P.warehouse.x, y: P.warehouse.y, r: 80, crime: true },
+        { text: 'Drop two — Sundial Tower', x: P.tower.x, y: P.tower.y, r: 85, crime: true },
+        { text: 'Drop three — Harbor General', x: P.hospital.x, y: P.hospital.y, r: 85, crime: true },
+        { text: 'Deliver all three to the Copa Cabana', x: P.club.x, y: P.club.y, r: 95, heat: 2, timer: 160 },
+      ],
+      reward: 750,
+      outro: [['rosa', 'Three for three. The tour eats, the band eats, and you, Rio — you get paid.']],
+    },
+    {
+      id: 'm8', from: 'marisol', title: 'Vice Harbor',
       intro: [
         ['marisol', 'Last job, Rio. The Gilded Flamingo is laundering through my club\'s books tonight.'],
         ['marisol', 'Take their ledger from the warehouse, torch nothing, hurt no one — just walk it to Pastor June. She\'ll make it sing.'],
@@ -98,7 +134,7 @@ export function missionDefs(G) {
         { text: 'Take the ledger at Pier 9', x: P.warehouse.x, y: P.warehouse.y, r: 80, crime: true },
         { text: 'Escape to Neon Chapel with the ledger', x: 2080, y: 1420, r: 95, heat: 3, timer: 200 },
       ],
-      reward: 700,
+      reward: 800,
       outro: [
         ['pastor', 'It\'s done. Half the pier bosses resign by Friday.'],
         ['marisol', 'Drinks on the house, partner. Vice Harbor is ours.'],

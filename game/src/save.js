@@ -1,6 +1,6 @@
 // localStorage save/load. Guards every access: some embeds disable storage,
 // so the game must run fine with saving unavailable.
-const KEY = 'vice-harbor-save-v1';
+const KEY = 'vice-harbor-save-v2';
 let memoryFallback = null;
 
 function store() {
@@ -21,6 +21,7 @@ export function saveGame(G) {
     hour: G.hour,
     totalEarned: G.totalEarned,
     faresDone: G.faresDone,
+    garage: { owned: G.garage.owned, storedCar: G.garage.storedCar },
   };
   const s = store();
   if (s) { try { s.setItem(KEY, JSON.stringify(data)); } catch { /* full/blocked */ } }

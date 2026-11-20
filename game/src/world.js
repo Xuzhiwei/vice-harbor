@@ -18,6 +18,8 @@ export function createWorld(seed = 20261120) {
     },
     camera: { x: 0, y: 0 },
     cars: [], peds: [], cops: [],
+    heli: null,              // police helicopter state, filled by police.js
+    garage: { owned: false, storedCar: null },
     bullets: [], casings: [], particles: [], skids: [], tracers: [],
     wanted: { stars: 0, heat: 0, lastSeenX: 0, lastSeenY: 0, lastSeenT: -99, bustedMeter: 0, unseenT: 0 },
     cash: 120, totalEarned: 0, faresDone: 0,
@@ -121,5 +123,6 @@ export function respawnAtHospital(G, fee) {
   G.player.car = null; G.player.dead = false;
   G.wanted.stars = 0; G.wanted.heat = 0; G.wanted.bustedMeter = 0;
   G.cops.length = 0;
+  G.heli = null;
   G.mode = 'play';
 }

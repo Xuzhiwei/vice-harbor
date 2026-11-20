@@ -37,6 +37,14 @@ export const WANTED = {
   bustedFill: 1.15,        // seconds of close contact to get busted
 };
 
+export const HELI = {
+  minStars: 4,       // air support joins the hunt at this wanted level
+  speed: 335,        // world units per second — faster than traffic, barely
+  sightRange: 540,   // how far its crew can pick the player out
+  orbitRadius: 130,  // hover offset it circles at while shadowing
+  leaveStars: 2,     // it peels off once the heat falls to this
+};
+
 export const GUN = {
   magSize: 12,
   reserveStart: 48,

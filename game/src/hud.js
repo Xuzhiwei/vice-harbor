@@ -98,6 +98,26 @@ export function drawMinimap(H, G, objective) {
     ctx.fillStyle = flash ? '#ff3b30' : '#2471ff';
     ctx.beginPath(); ctx.arc(cop.x * sx, cop.y * sy, 3.4, 0, Math.PI * 2); ctx.fill();
   }
+  // police helicopter: a white pulsing diamond, distinct from cruiser dots
+  if (G.heli) {
+    const hx = G.heli.x * sx, hy = G.heli.y * sy;
+    ctx.strokeStyle = 'rgba(255,255,255,0.65)'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.arc(hx, hy, 6.5 + Math.sin(G.time * 6) * 1.4, 0, Math.PI * 2); ctx.stroke();
+    ctx.save();
+    ctx.translate(hx, hy); ctx.rotate(Math.PI / 4);
+    ctx.fillStyle = '#ffffff';
+    const s = 3.6 + Math.sin(G.time * 6) * 0.7;
+    ctx.fillRect(-s / 2, -s / 2, s, s);
+    ctx.restore();
+  }
+  // garage: grey square until bought, cyan once it is yours
+  const gp = G.city.places.garage;
+  if (gp) {
+    ctx.fillStyle = G.garage && G.garage.owned ? '#37e2ff' : '#9aa5ad';
+    ctx.fillRect(gp.x * sx - 3, gp.y * sy - 3, 6, 6);
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1;
+    ctx.strokeRect(gp.x * sx - 3, gp.y * sy - 3, 6, 6);
+  }
   // packages
   ctx.fillStyle = '#ffb340';
   for (const pk of G.packages) if (!pk.taken) ctx.fillRect(pk.x * sx - 1.5, pk.y * sy - 1.5, 3, 3);

@@ -43,6 +43,12 @@ export function stageShot(G, C, name) {
       G.cops.push(cop);
     }
     forceStars(G, 4);
+    // At 4 stars the helicopter joins: pin it up-left of the hero with
+    // its spotlight pooled on the fleeing coupe.
+    G.heli = {
+      x: hero.x - 185, y: hero.y - 165, angle: 0.5, orbit: 0, leaving: false,
+      spotX: hero.x + 12, spotY: hero.y, seesYou: true,
+    };
     const M = G.missions;
     M.active = { def: M.defs[3], leg: 1, timer: 96 };
     G.banner = 'MISSION: Harbour Lights'; G.bannerT = 999;

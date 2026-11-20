@@ -134,6 +134,7 @@ export function buildCity(seed = 20261120) {
     warehouse: { x: 1560, y: 1980, label: 'Pier 9 Warehouse' },
     club: { x: 1080, y: 940, label: 'Copa Cabana Club' },
     tower: { x: 2080, y: 460, label: 'Sundial Tower' },
+    garage: { x: 2544, y: 640, label: 'Harbor Garage' },
   };
 
   return { buildings, parks, lots, palms, lamps, crosswalks, places, seed };
