@@ -158,7 +158,13 @@ function drawBuildings(ctx, state, cam, light) {
         const wx = b.x + 12 + i * ((b.w - 24) / cols);
         const wy = b.y + 12 + j * ((b.h - lift - 18) / rows);
         if (light.dark > 0.25 && lit > 0.45) {
-          ctx.fillStyle = `rgba(255, 205, 92, ${0.35 + light.dark * 0.6})`;
+          // Lit windows are not one flat gold: most burn warm, a few run
+          // cool office-white, and each shade sits at its own brightness.
+          const tone = ((Math.sin(b.seed * 3.7 + i * 3.31 + j * 17.17) * 24634.6345) % 1 + 1) % 1;
+          const a = 0.3 + light.dark * 0.62;
+          ctx.fillStyle = tone > 0.78
+            ? `rgba(190, 225, 255, ${a})`
+            : `rgba(255, ${tone > 0.4 ? 205 : 176}, 92, ${a})`;
         } else {
           ctx.fillStyle = 'rgba(38, 62, 84, 0.55)';
         }
@@ -169,16 +175,26 @@ function drawBuildings(ctx, state, cam, light) {
       const neon = NEON[Math.abs(Math.floor(b.seed)) % NEON.length];
       ctx.font = '700 13px system-ui, sans-serif';
       ctx.textAlign = 'center';
+      const signY = b.y + b.h - lift - 8;
       if (light.dark > 0.3) {
+        // Neon after dark: a wide halo pass under a hot near-white core, and
+        // now and then a tube dips — each sign flickers on its own schedule.
+        const flick = ((Math.sin(b.seed * 7.13 + Math.floor(state.time * 9) * 2.39) * 43758.5453) % 1 + 1) % 1;
+        const dip = flick > 0.965 ? 0.45 : 1;
         ctx.save();
+        ctx.globalAlpha = dip;
         ctx.shadowColor = neon;
-        ctx.shadowBlur = 14;
+        ctx.shadowBlur = 22;
         ctx.fillStyle = neon;
-        ctx.fillText(b.name, b.x + b.w / 2, b.y + b.h - lift - 8);
+        ctx.fillText(b.name, b.x + b.w / 2, signY);
+        ctx.shadowBlur = 6;
+        ctx.globalAlpha = dip * 0.85;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(b.name, b.x + b.w / 2, signY);
         ctx.restore();
       } else {
         ctx.fillStyle = 'rgba(52, 40, 34, 0.8)';
-        ctx.fillText(b.name, b.x + b.w / 2, b.y + b.h - lift - 8);
+        ctx.fillText(b.name, b.x + b.w / 2, signY);
       }
       ctx.textAlign = 'left';
     }
@@ -293,7 +309,15 @@ function drawPed(ctx, state, ped) {
   ctx.beginPath();
   ctx.arc(ped.x, ped.y + stepBob * 0.3, 3.9, 0, Math.PI * 2);
   ctx.fill();
-  if (ped.panic > 0) {
+  if (ped.hat) {
+    // A cap: a half-disc over the crown, in a colour that argues with the shirt.
+    ctx.fillStyle = ped.hat;
+    ctx.beginPath();
+    ctx.arc(ped.x, ped.y + stepBob * 0.3, 4.5, Math.PI * 0.92, Math.PI * 2.08);
+    ctx.closePath();
+    ctx.fill();
+  }
+  if (ped.panic > 0 || ped.startle > 0) {
     ctx.font = '700 12px system-ui, sans-serif';
     ctx.fillStyle = '#fff';
     ctx.fillText('!', ped.x - 1.5, ped.y - 12);
@@ -349,9 +373,20 @@ function drawCar(ctx, state, car, light) {
     ctx.fillStyle = '#fff6bf';
     ctx.fillRect(19.4, -8, 2.4, 4.4);
     ctx.fillRect(19.4, 3.6, 2.4, 4.4);
-    ctx.fillStyle = '#ff5147';
-    ctx.fillRect(-21.6, -8, 2.2, 4);
-    ctx.fillRect(-21.6, 4, 2.2, 4);
+    // Tail lights, flaring with a halo for as long as the car is braking.
+    if (car.brake > 0) {
+      ctx.save();
+      ctx.shadowColor = '#ff2d20';
+      ctx.shadowBlur = 12;
+      ctx.fillStyle = '#ff6a5e';
+      ctx.fillRect(-21.6, -8, 2.2, 4);
+      ctx.fillRect(-21.6, 4, 2.2, 4);
+      ctx.restore();
+    } else {
+      ctx.fillStyle = '#ff5147';
+      ctx.fillRect(-21.6, -8, 2.2, 4);
+      ctx.fillRect(-21.6, 4, 2.2, 4);
+    }
     if (light.dark > 0.3) {
       const grad = ctx.createLinearGradient(21, 0, 120, 0);
       grad.addColorStop(0, `rgba(255, 244, 180, ${0.16 * light.dark})`);
@@ -378,9 +413,10 @@ function drawCar(ctx, state, car, light) {
 function drawPlayer(ctx, state) {
   const p = state.player;
   if (p.inCar) return;
-  ctx.fillStyle = PALETTE.shadow;
+  // A deeper, wider contact shadow so Jules reads even at thumbnail size.
+  ctx.fillStyle = 'rgba(30, 20, 14, 0.35)';
   ctx.beginPath();
-  ctx.ellipse(p.x + 3, p.y + 5, 10, 4, 0, 0, Math.PI * 2);
+  ctx.ellipse(p.x + 3, p.y + 5, 11.5, 4.6, 0, 0, Math.PI * 2);
   ctx.fill();
   const bob = Math.sin(p.walkPhase) * 1.2;
   // Legs when moving.
@@ -388,13 +424,16 @@ function drawPlayer(ctx, state) {
   const legSwing = Math.sin(p.walkPhase) * 5;
   ctx.fillRect(p.x - 5 + Math.cos(p.angle) * legSwing * 0.4, p.y + 3, 4.4, 7);
   ctx.fillRect(p.x + 2 - Math.cos(p.angle) * legSwing * 0.4, p.y + 3, 4.4, 7);
-  // Jacket and head, ringed in white so the player reads at a glance.
+  // Jacket and head, ringed dark-then-white so the player reads at a glance.
   ctx.fillStyle = '#0fb5ae';
   ctx.beginPath();
   ctx.arc(p.x, p.y + bob * 0.25, 10.5, 0, Math.PI * 2);
   ctx.fill();
-  ctx.strokeStyle = 'rgba(255,255,255,0.85)';
-  ctx.lineWidth = 1.8;
+  ctx.strokeStyle = 'rgba(20, 16, 10, 0.55)';
+  ctx.lineWidth = 3.6;
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+  ctx.lineWidth = 1.9;
   ctx.stroke();
   ctx.fillStyle = '#f2c89b';
   ctx.beginPath();
@@ -440,6 +479,25 @@ function drawPlayer(ctx, state) {
   }
 }
 
+function drawSkids(ctx, state) {
+  if (!state.skids || state.skids.length === 0) return;
+  ctx.save();
+  ctx.strokeStyle = '#26221e';
+  ctx.lineCap = 'round';
+  for (const s of state.skids) {
+    ctx.globalAlpha = Math.max(0, s.life) * 0.42;
+    ctx.lineWidth = s.w;
+    ctx.beginPath();
+    ctx.moveTo(s.x1, s.y1);
+    ctx.lineTo(s.x2, s.y2);
+    ctx.stroke();
+    s.life -= 0.0016; // rubber fades a touch with every pass of the sun
+  }
+  ctx.restore();
+  ctx.globalAlpha = 1;
+  if (state.skids.every((s) => s.life <= 0)) state.skids.length = 0;
+}
+
 function drawFx(ctx, state) {
   for (const b of state.bullets) {
     ctx.strokeStyle = 'rgba(255, 230, 150, 0.9)';
@@ -449,7 +507,19 @@ function drawFx(ctx, state) {
     ctx.lineTo(b.x, b.y);
     ctx.stroke();
   }
+  // Brass casings get their own pass: little tumbling bars, not sparks.
   for (const pt of state.particles) {
+    if (pt.kind !== 'casing') continue;
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, pt.life / pt.max);
+    ctx.translate(pt.x, pt.y);
+    ctx.rotate((pt.spin || 0) + pt.life * 14);
+    ctx.fillStyle = '#d9a441';
+    ctx.fillRect(-2.4, -1, 4.8, 2);
+    ctx.restore();
+  }
+  for (const pt of state.particles) {
+    if (pt.kind === 'casing') continue;
     const a = Math.max(0, pt.life / pt.max);
     ctx.globalAlpha = pt.kind === 'smoke' ? a * 0.55 : a;
     ctx.fillStyle = pt.color;
@@ -458,6 +528,21 @@ function drawFx(ctx, state) {
     ctx.fill();
   }
   ctx.globalAlpha = 1;
+  // Hit-marker: a brief cross where the last bullet bit — red when it ended it.
+  if (state.hitmark && state.hitmark.t > 0) {
+    const hm = state.hitmark;
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, hm.t / 0.16);
+    ctx.strokeStyle = hm.kill ? '#ff5147' : '#ffffff';
+    ctx.lineWidth = 2.2;
+    for (const d of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+      ctx.beginPath();
+      ctx.moveTo(hm.x + d[0] * 3.2, hm.y + d[1] * 3.2);
+      ctx.lineTo(hm.x + d[0] * 7.5, hm.y + d[1] * 7.5);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
 }
 
 function drawLighting(ctx, state, light) {
@@ -498,6 +583,7 @@ export function drawWorld(ctx, state) {
   const shakeY = state.shake > 0 ? (Math.random() - 0.5) * state.shake : 0;
   ctx.translate(-Math.round(cam.x + shakeX), -Math.round(cam.y + shakeY));
   drawGround(ctx, state, cam);
+  drawSkids(ctx, state);
   drawPackages(ctx, state);
   drawMarker(ctx, state);
   for (const ped of state.peds) {

@@ -50,6 +50,8 @@ export function missionDefs(city) {
         line('ferris', 'Marina vouched for you, so here is the thing. A package sat too long in a lot off Avenida Coral.'),
         line('ferris', 'Pick it up and bring it to my garage. Do not open it, do not dawdle, and if the harbour police ask — you are delivering sandwiches.'),
         line('jules', 'Heavy sandwiches, I bet.'),
+        line('jules', 'And if I am late?'),
+        line('ferris', 'Then whatever is in that box becomes somebody else’s problem. The clock starts the second you lift it.'),
       ],
       stages: [
         { x: hotSpot.x, y: hotSpot.y, r: 46, label: 'Pick up the package from the lot', tag: 'pickup' },
@@ -69,7 +71,7 @@ export function missionDefs(city) {
         { x: 2380, y: 1342, r: 46, label: 'Pick up fare 2 — the drummer on Calle Palma', needCar: true },
         { x: S.club.x, y: S.club.y, r: 58, label: 'Drop fare 2 at the Golden Hour Club', needCar: true },
         { x: 318, y: 1420, r: 46, label: 'Pick up fare 3 — the chef on Avenida Coral', needCar: true },
-        { x: S.pier.x, y: S.pier.y, r: 58, label: 'Drop fare 3 at Pier 9', needCar: true },
+        { x: S.pier.x, y: S.pier.y, r: 58, label: 'Drop fare 3 at Pier 9 — fast, his kitchen is already shouting', needCar: true, timer: 90 },
       ],
       outro: [
         line('eddie', 'Clean sheet, three happy fares. You are on the radio now, Jules — passengers will flag you down all over the harbour.'),
@@ -81,11 +83,12 @@ export function missionDefs(city) {
       intro: [
         line('nils', 'So you are Marina’s driver. Nils Beck. The Commodore, if the harbour police are listening — and they usually are.'),
         line('nils', 'A crate waits at the end of the promenade. The moment you touch it, every cruiser in Vice Harbor will want your autograph.'),
+        line('jules', 'You had me at every cruiser in Vice Harbor.'),
         line('nils', 'Lose them, then bring it to Ferris. He owes me a quiet garage and a loud engine.'),
       ],
       stages: [
         { x: 3130, y: 300, r: 46, label: 'Take the Commodore’s crate from the promenade', tag: 'hotpickup' },
-        { x: S.garage.x, y: S.garage.y, r: 58, label: 'Reach Ferris & Sons Garage' },
+        { x: S.garage.x, y: S.garage.y, r: 58, label: 'Reach Ferris & Sons Garage — before the trail goes cold', timer: 110 },
         { kind: 'loseheat', label: 'Lose the heat — break line of sight and stay hidden' },
       ],
       outro: [line('nils', 'Ha! The harbour has a new ghost. Rosa Vega asked about you, by the way. Wear something with pockets.')],
@@ -119,6 +122,7 @@ export function missionDefs(city) {
       ],
       outro: [
         line('marina', 'Vice Harbor is yours now, Jules. Every road, every neon sign.'),
+        line('marina', 'Drinks are on the Solana terrace when you are ready. You have earned the view.'),
         line('nils', 'The Commodore salutes you. Keep the engine warm — a harbour like this never stays quiet for long.'),
       ],
     },

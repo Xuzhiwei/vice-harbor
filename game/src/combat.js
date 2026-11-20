@@ -50,7 +50,8 @@ function fireBullet(state) {
   const arm = state.armory;
   arm.mag -= 1;
   arm.cooldown = FIRE_INTERVAL;
-  const spread = (Math.random() - 0.5) * 0.035;
+  // A held trigger walks wide: spread grows with the recoil still in the gun.
+  const spread = (Math.random() - 0.5) * (0.035 + p.recoil * 0.055);
   const a = p.aimAngle + spread;
   state.bullets.push({
     x: p.x + Math.cos(p.aimAngle) * (PLAYER_RADIUS + 7),
@@ -59,8 +60,20 @@ function fireBullet(state) {
     vy: Math.sin(a) * BULLET_SPEED,
     life: BULLET_RANGE / BULLET_SPEED,
   });
+  // A brass casing pops out of the ejection port and tumbles to the pavement.
+  state.particles.push({
+    x: p.x + Math.cos(p.aimAngle) * 12,
+    y: p.y + Math.sin(p.aimAngle) * 12,
+    vx: Math.cos(p.aimAngle + Math.PI / 2) * (30 + Math.random() * 26) - Math.cos(p.aimAngle) * 14,
+    vy: Math.sin(p.aimAngle + Math.PI / 2) * (30 + Math.random() * 26) - Math.sin(p.aimAngle) * 14,
+    life: 0.55, max: 0.55, size: 1.6, color: '#d9a441', kind: 'casing',
+    spin: Math.random() * 6,
+  });
   p.muzzle = 0.05;
   p.recoil = 1;
+  // The kick nudges Jules back a step; the next step's collision tidies it up.
+  p.x -= Math.cos(p.aimAngle) * 1.1;
+  p.y -= Math.sin(p.aimAngle) * 1.1;
   state.audio?.gunshot();
   scarePeds(state, p.x, p.y, 210);
   commitCrime(state, 34, p.x, p.y, 'Shots fired!');
@@ -72,7 +85,12 @@ export function updateCombat(state, input, dt) {
   arm.cooldown = Math.max(0, arm.cooldown - dt);
   p.muzzle = Math.max(0, p.muzzle - dt);
   p.meleeTime = Math.max(0, p.meleeTime - dt);
-  p.recoil = Math.max(0, p.recoil - dt * 5);
+  // Recoil lingers a while, so a long burst walks wider than a careful pair.
+  p.recoil = Math.max(0, p.recoil - dt * 2.6);
+  if (state.hitmark) {
+    state.hitmark.t -= dt;
+    if (state.hitmark.t <= 0) state.hitmark = null;
+  }
 
   if (arm.reload > 0) {
     arm.reload -= dt;
@@ -95,7 +113,11 @@ export function updateCombat(state, input, dt) {
       if (arm.reload <= 0 && arm.cooldown <= 0) {
         if (arm.mag > 0) fireBullet(state);
         else if (arm.reserve > 0) startReload(state);
-        else state.audio?.dryFire();
+        else {
+          // An empty gun clicks — but not sixty times a second.
+          state.audio?.dryFire();
+          arm.cooldown = 0.28;
+        }
       }
     }
   }
@@ -111,6 +133,7 @@ export function updateCombat(state, input, dt) {
       for (const ped of state.peds) {
         if (ped.state !== 'down' && dist(ped.x, ped.y, b.x, b.y) < 11) {
           damagePed(state, ped, 34, p.x, p.y);
+          state.hitmark = { x: b.x, y: b.y, t: 0.22, kill: ped.state === 'down' };
           hit = true;
           break;
         }
@@ -127,6 +150,7 @@ export function updateCombat(state, input, dt) {
             if (car.health <= 0) { car.dead = true; spawnSparks(state, car.x, car.y, 10); }
           }
           spawnSparks(state, b.x, b.y, 3);
+          state.hitmark = { x: b.x, y: b.y, t: 0.22, kill: car.dead };
           hit = true;
           break;
         }

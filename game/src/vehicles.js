@@ -26,7 +26,7 @@ export function createCar(x, y, angle, color, kind) {
     // police brain
     sirenPhase: Math.random() * 6,
     // shared
-    honk: 0, smoke: 0, entered: false,
+    honk: 0, smoke: 0, entered: false, brake: 0, lastSkid: null,
   };
 }
 
@@ -107,7 +107,16 @@ function carVsCars(state, car) {
         if (car.kind === 'player' || other.kind === 'player') {
           commitCrime(state, 26, car.x, car.y, 'A crash like that gets noticed.');
         }
-        spawnSparks(state, (car.x + other.x) / 2, (car.y + other.y) / 2, 7);
+        // The harder the hit, the bigger the burst — and a real shunt
+        // breathes a little smoke along with the sparks.
+        const mx = (car.x + other.x) / 2;
+        const my = (car.y + other.y) / 2;
+        spawnSparks(state, mx, my, Math.min(15, 5 + Math.floor(impact / 22)));
+        if (impact > 170) {
+          for (let s = 0; s < 3; s += 1) {
+            state.particles.push({ x: mx, y: my, vx: (Math.random() - 0.5) * 20, vy: -18 - Math.random() * 14, life: 0.8, max: 0.8, size: 5.5, color: 'rgba(90,90,90,0.4)', kind: 'smoke' });
+          }
+        }
       } else {
         car.speed *= 0.8; other.speed *= 0.8;
       }
@@ -137,7 +146,7 @@ function collideWorld(state, car) {
         state.shake = Math.min(8, before * 0.02);
         state.player.health -= (before - 120) * 0.03;
       }
-      spawnSparks(state, car.x, car.y, 5);
+      spawnSparks(state, car.x, car.y, Math.min(13, 4 + Math.floor(before / 42)));
     }
     car.speed *= 0.35;
     car.vx *= 0.3; car.vy *= 0.3;
@@ -185,6 +194,8 @@ export function updateTrafficCar(state, car, dt) {
   const target = blocked ? 0 : car.cruise;
   car.speed += clamp(target - car.speed, -320 * dt, 170 * dt);
   if (blocked && car.speed < 4 && Math.random() < dt * 0.5) car.honk = 0.7;
+  // Brake lights flare whenever the car is shedding speed in a hurry.
+  car.brake = target < car.speed - 6 ? 0.22 : Math.max(0, car.brake - dt);
 
   const want = Math.atan2(ty - car.y, tx - car.x);
   let diff = want - car.angle;
@@ -199,10 +210,30 @@ export function updateTrafficCar(state, car, dt) {
   carVsCars(state, car);
 }
 
+/** Lay one rubber streak segment behind each rear wheel; render fades them. */
+function laySkid(state, car, fx, fy) {
+  if (!state.skids) state.skids = [];
+  const rearX = car.x - fx * 15;
+  const rearY = car.y - fy * 15;
+  const sideX = -fy * 8;
+  const sideY = fx * 8;
+  const last = car.lastSkid;
+  if (last && Math.hypot(rearX - last.x, rearY - last.y) < 26) {
+    state.skids.push({ x1: last.x + sideX, y1: last.y + sideY, x2: rearX + sideX, y2: rearY + sideY, w: 3.2, life: 1 });
+    state.skids.push({ x1: last.x - sideX, y1: last.y - sideY, x2: rearX - sideX, y2: rearY - sideY, w: 3.2, life: 1 });
+    if (state.skids.length > 360) state.skids.splice(0, state.skids.length - 360);
+  }
+  car.lastSkid = { x: rearX, y: rearY };
+}
+
 /** The player's car: throttle, steering that bites with speed, handbrake drift. */
 export function updatePlayerCar(state, car, drive, dt) {
   const accel = drive.throttle > 0 ? CAR_ACCEL : drive.throttle < 0 ? CAR_ACCEL * 0.72 : 0;
   car.speed += drive.throttle * accel * dt;
+  // Brake lights: reversing against forward speed, or the handbrake, lights them.
+  car.brake = (drive.throttle < 0 && car.speed > 10) || drive.handbrake
+    ? 0.22
+    : Math.max(0, car.brake - dt);
   const drag = drive.handbrake ? 1.6 : 0.55;
   car.speed -= car.speed * drag * dt;
   if (drive.throttle === 0) car.speed -= Math.sign(car.speed) * Math.min(Math.abs(car.speed), 26 * dt);
@@ -224,6 +255,10 @@ export function updatePlayerCar(state, car, drive, dt) {
   if (Math.abs(car.speed) > 130 && drive.handbrake && Math.random() < dt * 22) {
     state.particles.push({ x: car.x - fx * 16, y: car.y - fy * 16, vx: 0, vy: 0, life: 0.5, max: 0.5, size: 5, color: 'rgba(230,230,230,0.5)', kind: 'smoke' });
   }
+  // Rubber on the road: a handbrake slide or a panic stop paints the corner.
+  const layingRubber = Math.abs(car.speed) > 120 && (drive.handbrake || (drive.throttle < 0 && car.speed > 0));
+  if (layingRubber) laySkid(state, car, fx, fy);
+  else car.lastSkid = null;
   collideWorld(state, car);
   carVsCars(state, car);
   if (car.health <= 0 && !car.dead) {

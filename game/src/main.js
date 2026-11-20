@@ -57,15 +57,24 @@ function runGame() {
   let accumulator = 0;
   let last = performance.now();
   let titlePan = 0;
+  let fade = 1; // the harbour fades in from black on boot and after each reset
   const extraKeys = new Set();
   window.addEventListener('keydown', (event) => {
     if (!event.repeat) extraKeys.add(event.code);
   });
 
+  function drawFade(dtReal) {
+    if (fade <= 0) return;
+    ctx.fillStyle = `rgba(6, 4, 10, ${fade})`;
+    ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+    fade = Math.max(0, fade - dtReal * 1.5);
+  }
+
   function newGame() {
     state = createGame(CITY_SEED, audio);
     screen = 'play';
     state.screen = 'play';
+    fade = 1;
     announce('Vice Harbor. Meet your contact at the orange marker.');
   }
 
@@ -74,6 +83,7 @@ function runGame() {
     if (loadGame(state)) {
       screen = 'play';
       state.screen = 'play';
+      fade = 1;
       state.toast = { text: 'Welcome back to Vice Harbor', time: 3 };
       announce('Save loaded.');
     } else {
@@ -103,6 +113,7 @@ function runGame() {
         respawn(state, screen === 'busted');
         screen = 'play';
         state.screen = 'play';
+        fade = 1;
       }
       return;
     }
@@ -138,14 +149,17 @@ function runGame() {
 
   function frame(now) {
     requestAnimationFrame(frame);
-    accumulator += Math.min((now - last) / 1000, MAX_FRAME);
+    const dtReal = Math.min((now - last) / 1000, MAX_FRAME);
+    accumulator += dtReal;
     last = now;
     handleActions();
     extraKeys.clear();
 
     if (screen === 'title') {
       // The harbour idles behind the title: traffic rolls, the camera drifts.
-      titlePan += 1 / 60;
+      // The drift runs on real elapsed time, so it glides at the same pace on
+      // a 60 Hz laptop and a 144 Hz monitor alike.
+      titlePan += dtReal;
       while (accumulator >= STEP) {
         stepGame(state, input, STEP);
         accumulator -= STEP;
@@ -154,6 +168,7 @@ function runGame() {
       state.camera.y = (Math.cos(titlePan * 0.07) * 0.5 + 0.5) * 900;
       drawWorld(ctx, state);
       drawTitleScreen(ctx, state, hasSave());
+      drawFade(dtReal);
       return;
     }
 
@@ -190,6 +205,7 @@ function runGame() {
     if (screen === 'pause') drawPauseScreen(ctx, state);
     if (screen === 'busted') drawEndScreen(ctx, state, 'busted');
     if (screen === 'wasted') drawEndScreen(ctx, state, 'wasted');
+    drawFade(dtReal);
 
     const p = state.player;
     let copDistance = Infinity;
@@ -201,6 +217,13 @@ function runGame() {
 
   document.addEventListener('visibilitychange', () => {
     if (document.hidden && screen === 'play') {
+      screen = 'pause';
+      state.screen = 'pause';
+    }
+  });
+  // Alt-tabbing away on a desktop browser deserves the same mercy.
+  window.addEventListener('blur', () => {
+    if (screen === 'play') {
       screen = 'pause';
       state.screen = 'pause';
     }

@@ -164,7 +164,9 @@ export function drawHUD(ctx, state) {
     ctx.textAlign = 'left';
   }
 
-  // Objective line, top-centre.
+  // Objective line, top-centre. It carries the distance to the target, and a
+  // change of objective earns a brief banner under the line (the first
+  // objective of a session is set silently, so staged scenes stay clean).
   const stage = currentStage(state);
   const marker = missionMarker(state);
   let objective = '';
@@ -172,29 +174,70 @@ export function drawHUD(ctx, state) {
   else if (state.fare) objective = state.fare.phase === 'pickup' ? 'Pick up your fare' : 'Drop your fare at the gold marker';
   else if (marker) objective = `Meet ${state.missions.defs[state.missions.index].giver === 'nils' ? 'Nils Beck' : 'your contact'} — ${marker.label}`;
   if (objective) {
+    if (state._objText === undefined || state._objText === '') {
+      if (state._objText === '') state._objT = state.time;
+      state._objText = objective;
+    } else if (state._objText !== objective) {
+      state._objText = objective;
+      state._objT = state.time;
+    }
+    let target = null;
+    if (stage && stage.kind !== 'loseheat') target = stage;
+    else if (stage) target = state.city.specials.garage;
+    else if (state.fare) target = state.fare.phase === 'pickup' ? state.fare : { x: state.fare.destX, y: state.fare.destY };
+    else if (marker) target = marker;
+    const distText = target ? ` · ${Math.max(10, Math.round(Math.hypot(target.x - p.x, target.y - p.y) / 10) * 10)}m` : '';
     ctx.font = '600 17px system-ui, sans-serif';
-    const w = ctx.measureText(objective).width + 30;
+    const w = ctx.measureText(objective + distText).width + 30;
     ctx.fillStyle = 'rgba(12, 14, 22, 0.62)';
     roundRect(ctx, (VIEW_W - w) / 2, 14, w, 32, 9);
     ctx.fill();
     ctx.fillStyle = '#ffeec2';
     ctx.textAlign = 'center';
-    ctx.fillText(objective, VIEW_W / 2, 37);
+    ctx.fillText(objective + distText, VIEW_W / 2, 37);
     ctx.textAlign = 'left';
+    // The banner: a larger card that announces the new objective, then goes.
+    const age = state._objT === undefined ? 99 : state.time - state._objT;
+    if (age < 2.8) {
+      const fade = age > 2.2 ? 1 - (age - 2.2) / 0.6 : 1;
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, fade);
+      ctx.font = '700 20px system-ui, sans-serif';
+      const bw = ctx.measureText(objective).width + 56;
+      ctx.fillStyle = 'rgba(12, 14, 22, 0.78)';
+      roundRect(ctx, (VIEW_W - bw) / 2, 56, bw, 52, 11);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255, 217, 61, 0.65)';
+      ctx.lineWidth = 1.6;
+      roundRect(ctx, (VIEW_W - bw) / 2, 56, bw, 52, 11);
+      ctx.stroke();
+      ctx.font = '700 10px system-ui, sans-serif';
+      ctx.fillStyle = '#ffd83d';
+      ctx.textAlign = 'center';
+      ctx.fillText('NEW OBJECTIVE', VIEW_W / 2, 74);
+      ctx.font = '700 20px system-ui, sans-serif';
+      ctx.fillStyle = '#ffeec2';
+      ctx.fillText(objective, VIEW_W / 2, 99);
+      ctx.textAlign = 'left';
+      ctx.restore();
+    }
+  } else {
+    state._objText = '';
   }
   if (state.missions.active && state.missions.timer > 0) {
     const t = Math.max(0, state.missions.timer);
+    const bannerAge = state._objT === undefined ? 99 : state.time - state._objT;
     ctx.font = '700 20px system-ui, sans-serif';
     ctx.fillStyle = t < 25 ? '#ff6b6b' : '#ffffff';
     ctx.textAlign = 'center';
-    ctx.fillText(`${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`, VIEW_W / 2, 74);
+    ctx.fillText(`${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`, VIEW_W / 2, bannerAge < 2.8 ? 132 : 74);
     ctx.textAlign = 'left';
   }
 
-  // Weapon readout, bottom-right.
+  // Weapon readout, bottom-right. The numbers redden as the magazine runs dry.
   if (!p.inCar) {
     ctx.font = '600 16px system-ui, sans-serif';
-    ctx.fillStyle = '#fdf6e3';
+    ctx.fillStyle = state.armory.reload > 0 ? '#fdf6e3' : state.armory.mag === 0 ? '#ff8a80' : state.armory.mag <= 3 ? '#ffb74d' : '#fdf6e3';
     const gun = state.armory.reload > 0 ? 'PISTOL — RELOADING' : `PISTOL  ${state.armory.mag} / ${state.armory.reserve}`;
     ctx.strokeStyle = 'rgba(20,16,8,0.6)';
     ctx.lineWidth = 3;
@@ -244,6 +287,19 @@ export function drawHUD(ctx, state) {
     ctx.font = '400 11px system-ui, sans-serif';
     ctx.fillStyle = 'rgba(245,242,232,0.55)';
     ctx.fillText('E or click — next', x + w - 108, y + h - 10);
+  }
+
+  // Damage vignette: a red bloom that spikes the moment Jules is hurt and
+  // throbs for as long as his health sits in the red.
+  const hurtBloom = Math.min(1, p.hurtTime * 2.2) * 0.5;
+  const lowThrob = hpFrac < 0.35 && p.health > 0 ? 0.17 + Math.sin(state.time * 5) * 0.05 : 0;
+  const vig = Math.max(hurtBloom, lowThrob);
+  if (vig > 0.01) {
+    const grad = ctx.createRadialGradient(VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.42, VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.92);
+    grad.addColorStop(0, 'rgba(200, 20, 10, 0)');
+    grad.addColorStop(1, `rgba(200, 20, 10, ${vig})`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   }
   ctx.restore();
 }

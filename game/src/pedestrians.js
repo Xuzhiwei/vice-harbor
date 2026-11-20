@@ -5,16 +5,22 @@ import { clamp, dist } from './city.js';
 import { commitCrime } from './police.js';
 
 export function createPed(x, y, rng) {
+  const kindRoll = rng();
   return {
     x, y,
     angle: rng() * Math.PI * 2,
     speed: 34 + rng() * 30,
     shirt: PED_SHIRTS[Math.floor(rng() * PED_SHIRTS.length)],
     skin: ['#f2c89b', '#c68863', '#8d5a3b', '#6e442a', '#ffd9b3'][Math.floor(rng() * 5)],
+    // Variety in the crowd: some wear a cap in a clash colour, some are out
+    // for a run, and some drift along staring at a phone, stopping to read.
+    hat: rng() < 0.3 ? PED_SHIRTS[Math.floor(rng() * PED_SHIRTS.length)] : null,
+    kind: kindRoll < 0.14 ? 'jogger' : kindRoll < 0.24 ? 'phone' : 'walker',
+    idle: 0,
     health: 30,
     state: 'walk', // 'walk' | 'flee' | 'down'
     fleeX: 0, fleeY: 0, fleeTime: 0,
-    panic: 0, walkPhase: rng() * 6, retarget: 0,
+    panic: 0, startle: 0, walkPhase: rng() * 6, retarget: 0,
     downTime: 0, reported: false,
   };
 }
@@ -46,7 +52,8 @@ export function updatePeds(state, dt) {
       ped.downTime -= dt;
       continue;
     }
-    ped.walkPhase += dt * (ped.state === 'flee' ? 13 : 7);
+    ped.startle = Math.max(0, ped.startle - dt);
+    ped.walkPhase += dt * (ped.state === 'flee' ? 13 : ped.kind === 'jogger' ? 11 : 7);
     let moveX = 0;
     let moveY = 0;
     let speed = ped.speed;
@@ -60,6 +67,16 @@ export function updatePeds(state, dt) {
       speed = WALK_SPEED * 1.55;
       if (ped.fleeTime <= 0) { ped.state = 'walk'; ped.panic = 0; }
     } else {
+      if (ped.kind === 'jogger') speed = ped.speed * 1.75;
+      // Phone-gazers stop dead every so often to read what just buzzed.
+      if (ped.kind === 'phone') {
+        if (ped.idle > 0) {
+          ped.idle -= dt;
+          speed = 0;
+        } else if (Math.random() < dt * 0.09) {
+          ped.idle = 1.6 + Math.random() * 2.2;
+        }
+      }
       ped.retarget -= dt;
       if (ped.retarget <= 0) {
         ped.retarget = 2 + Math.random() * 3;
@@ -106,7 +123,12 @@ export function updatePeds(state, dt) {
         }
         break;
       }
-      if (d < 64 && ped.state !== 'flee') {
+      // A fast pass at arm's length startles without emptying the street;
+      // only a genuinely close car sends anyone running.
+      if (d < 80 && d >= 52 && cs > 110 && ped.state === 'walk') {
+        ped.startle = Math.max(ped.startle, 0.7);
+      }
+      if (d < 52 && ped.state !== 'flee') {
         ped.state = 'flee';
         ped.fleeX = car.x; ped.fleeY = car.y;
         ped.fleeTime = 1.1;
